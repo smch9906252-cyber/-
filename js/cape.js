@@ -166,7 +166,7 @@ const Cape = {
       k++;
     };
     for (let r = 0; r < R - 1; r++) {   // 어깨 쪽은 짙고 아래로 갈수록 밝은 진홍, 맨 아랫단은 금
-      const k = 0.7 + 0.3 * (r / (R - 2));
+      const k = 0.82 + 0.18 * (r / (R - 2));   // 어깨 쪽을 너무 짙게 하지 않음 (명암은 셰이더가 부드럽게 맡음)
       const color = r === R - 2 ? KNIGHT.gold : [KNIGHT.cape[0] * k, KNIGHT.cape[1] * k, KNIGHT.cape[2] * k, KNIGHT.cape[3]];
       for (let c = 0; c < C - 1; c++) {
         put(r, c, color); put(r + 1, c, color); put(r, c + 1, color);

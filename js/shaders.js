@@ -198,6 +198,8 @@ uniform vec3 uDimTint;
 uniform vec4 uGlowSwap;    // w가 1이면 스스로 빛나는 부분을 이 색으로 (용사 갑옷 빛줄기가 무기 속성 색을 따라감)
 uniform vec3 uRuneColor;   // 망토 문장의 칼날 실 색
 uniform float uCelAmbient; // 캐릭터 그늘 밝기 (숲 1, 어두운 동굴은 낮게)
+uniform vec4 uCelLook;     // 캐릭터 그림체: x 명암 경계 너비(0보다 크게), y 그늘 밝기, z 밝은 면 밝기, w 그늘이 하늘·땅빛을 받는 정도
+uniform vec4 uCelLook2;    // x 윤곽 빛, y 밝은 면의 둥근 그러데이션, z 금속 대비, w 얇은 천(망토)에 비치는 햇빛
 uniform vec4 uLights[12];      // 주변을 비추는 빛 (횃불·수정·검): xyz 위치, w 닿는 거리(m)
 uniform vec3 uLightColors[12];
 uniform int uLightCount;
@@ -301,7 +303,7 @@ void main() {
     float grip = max(abs(q.x) - 0.009, abs(q.y + 0.155) - 0.04);
     float pommel = length(q - vec2(0.0, -0.205)) - 0.017;
     float d = min(min(ring, blade), min(min(guard, grip), pommel));
-    base = mix(base, vec3(0.69, 0.4, 0.042), 1.0 - smoothstep(-aa, aa, d));
+    base = mix(base, vec3(0.69, 0.46, 0.11), 1.0 - smoothstep(-aa, aa, d));   // 금실 (갑옷의 부드러운 금 테와 같은 색)
     float rune = max(abs(q.x) - 0.0045, max(-0.09 - q.y, q.y - 0.17));
     base = mix(base, uRuneColor, 1.0 - smoothstep(-aa, aa, rune));
   }
@@ -334,18 +336,29 @@ void main() {
   col += shadeBase * uSkyColor * 0.25 * (1.0 - light);           // 그늘은 하늘빛을 받아 살짝 푸르게
   if (leafy) col += base * uSunColor * uLeafGlow * (1.0 - light) * cloud;   // 그늘진 잎도 햇빛이 비쳐 들어 은은한 연둣빛
   if (uCel > 0.5) {
-    // 애니메이션풍: 밝은 면과 그늘 두 단계로 또렷하게. 그늘은 어둡게만 하지 않고 색을 입힘 (피부는 분홍, 옷·갑옷은 보랏빛 파랑)
+    // 애니메이션풍: 밝은 면과 그늘 두 단계. 그늘은 어둡게만 하지 않고 색을 입힘 (피부는 분홍, 옷·갑옷은 보랏빛 파랑)
+    // 테마별 그림체 (uCelLook·uCelLook2): 숲은 야숨처럼 경계가 부드럽고, 그늘이 밝고 하늘빛을 띰
     float hl = dot(n, uSunDir) * 0.5 + 0.5;
-    float ramp = smoothstep(0.44, 0.5, hl * mix(0.45, 1.0, sh));
+    float lam = smoothstep(0.47 - uCelLook.x, 0.47 + uCelLook.x, hl);
+    float ramp = lam * smoothstep(0.1, 0.9, sh);   // 그림자·구름 그늘도 부드럽게 받음 (몸 위 그림자가 칼같이 끊기지 않게)
     vec3 tint = skin ? vec3(1.0, 0.72, 0.7) : hairMat ? vec3(0.6, 0.62, 0.85) : vec3(0.66, 0.68, 0.88);
+    vec3 hemi = mix(uGroundColor, uSkyColor, 0.8 + 0.2 * n.y);   // 위는 하늘빛, 아래는 풀밭에서 튀어 오른 빛
+    tint = mix(tint, hemi / max(max(hemi.r, hemi.g), max(hemi.b, 0.001)), uCelLook.w * (skin ? 0.5 : 1.0));   // 그늘이 맑은 하늘빛을 띰 (피부는 덜)
     vec3 warm = uSunColor / max(uSunColor.r, 0.001);
-    float litK = shine > 0.0 ? 1.7 : 2.0;   // 금속은 조금 덜 밝게 (반짝임이 돋보이게)
-    col = base * mix(tint * 0.95 * uCelAmbient, mix(vec3(1.0), warm, 0.45) * litK, ramp);
-    col += base * uSunColor * 0.45 * smoothstep(0.62, 0.82, 1.0 - max(dot(n, v), 0.0)) * (0.35 * uCelAmbient + 0.65 * ramp);   // 윤곽을 따라 밝은 테두리 빛
-    if (shine > 0.0) {   // 애니메이션풍 금속: 하늘이 비치는 쪽은 밝게, 땅이 비치는 쪽은 어둡게 또렷이 나뉨
+    float litK = uCelLook.z * (shine > 0.0 ? 0.85 : 1.0);   // 금속은 조금 덜 밝게 (반짝임이 돋보이게)
+    float grad = 1.0 - uCelLook2.y * (1.0 - smoothstep(0.5, 1.0, hl));   // 밝은 면도 경계 쪽으로 살짝 어두워져 둥근 부피감
+    col = base * mix(tint * uCelLook.y * uCelAmbient, mix(vec3(1.0), warm, 0.45) * litK * grad, ramp);
+    float fres = smoothstep(0.62, 0.82, 1.0 - max(dot(n, v), 0.0));
+    col += base * uSunColor * uCelLook2.x * fres * (0.35 * uCelAmbient + 0.65 * ramp);   // 윤곽을 따라 밝은 테두리 빛
+    col += uSkyColor * uCelLook.w * uCelLook2.x * fres * (0.5 + 0.5 * n.y) * uCelAmbient;   // 그늘 쪽 윤곽도 하늘빛으로 은은히 떠 보임
+    if (uTwoSided > 0.5) {   // 얇은 천(망토): 해가 뒤에 있으면 그늘진 면으로 햇빛이 비쳐 따뜻하게 물듦
+      float back = max(dot(-n, uSunDir), 0.0) * (0.5 + 0.5 * max(dot(-v, uSunDir), 0.0));
+      col += base * uSunColor * uCelLook2.w * back * (1.0 - ramp) * (0.35 + 0.65 * smoothstep(0.1, 0.9, sh));
+    }
+    if (shine > 0.0) {   // 애니메이션풍 금속: 하늘이 비치는 쪽은 밝게, 땅이 비치는 쪽은 어둡게 (uCelLook2.z로 대비 조절, 숲은 무르게)
       vec3 r = reflect(-v, n);
       float skyR = smoothstep(-0.06, 0.06, r.y);
-      col *= mix(1.0, mix(0.5, 1.25, skyR), shine);
+      col *= mix(1.0, mix(1.0 - 0.5 * uCelLook2.z, 1.0 + 0.25 * uCelLook2.z, skyR), shine);
       col += uSkyColor * skyR * shine * 0.12;
     }
   }
@@ -428,9 +441,10 @@ void main() {
 precision mediump float;
 in vec3 vBase;
 uniform vec3 uColor;
+uniform vec2 uTone;   // x: 그 부분 색을 어둡게 하는 배율, y: 그 색을 섞는 비율 (나머지는 uColor). 숲은 검은 기 없이 옅게
 out vec4 outColor;
 void main() {
-  outColor = vec4(mix(uColor, pow(vBase, vec3(1.0 / 2.2)) * 0.3, 0.8), 0.0);
+  outColor = vec4(mix(uColor, pow(vBase, vec3(1.0 / 2.2)) * uTone.x, uTone.y), 0.0);
 }`,
 
   // 잔상: 테두리일수록 진한 푸른 빛 (더하기로 겹쳐 그림)

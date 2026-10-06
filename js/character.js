@@ -1,19 +1,20 @@
 // 3인칭에서 보이는 전사(기사) 모델과 움직임(애니메이션)
 // 몸은 관절로 이어져 있어서, 관절을 돌리면 그 아래 부분이 함께 움직입니다.
 
-// 용사 색: 짙은 건메탈 갑옷 + 금 테두리 + 발뭉과 같은 푸른 빛줄기, 남색 코트, 진홍 망토
+// 용사 색 (야숨풍): 밝은 청회색 강철 + 부드러운 금 + 발뭉과 같은 푸른 빛줄기, 차분한 남청 코트, 물 빠진 진홍 망토
+// (아주 어둡거나 새빨간 색은 파스텔 세상에서 혼자 검게 떠 보여서, 밝기를 올리고 채도를 조금 낮춤)
 // (네 번째 값: 0~1 금속 반짝임, MAT.CLOTH 천, MAT.GLOW 스스로 빛남)
 const KNIGHT = {
-  armor: Utils.color('#3b434e', 0.75),
-  armorLight: Utils.color('#5b6674', 0.85),
-  gold: Utils.color('#d9a93a', 0.8),
+  armor: Utils.color('#5b6676', 0.75),
+  armorLight: Utils.color('#8490a0', 0.85),
+  gold: Utils.color('#d8b45e', 0.8),
   glow: Utils.color('#58c8ff', MAT.GLOW),
-  suit: Utils.color('#1d2330', MAT.CLOTH),
-  coat: Utils.color('#18234a', MAT.CLOTH),
-  leather: Utils.color('#3a2416'),
-  cape: Utils.color('#7a1020', MAT.CLOTH),
+  suit: Utils.color('#343d4f', MAT.CLOTH),
+  coat: Utils.color('#2d4273', MAT.CLOTH),
+  leather: Utils.color('#6a4a30'),
+  cape: Utils.color('#a3363c', MAT.CLOTH),
   skin: Utils.color('#f0c4a0', MAT.SKIN),
-  hair: Utils.color('#17171f', MAT.HAIR),     // 검은 머리
+  hair: Utils.color('#2a2a35', MAT.HAIR),     // 검은 머리 (새까맣지 않게 살짝 띄움 → 윤기 띠·윤곽 빛이 보임)
   eyeWhite: Utils.color('#f4f1ec'),
   iris: Utils.color('#2f6fd0'),               // 푸른 눈
   brow: Utils.color('#141418'),

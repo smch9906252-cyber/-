@@ -28,6 +28,12 @@ const LIGHTING = {
     fogScale: 0.85,                             // 가까운 안개는 조금 옅게 (먼 곳은 공기 원근감이 맡음)
     farFog: 0.7,                                // 먼 산·언덕 모델의 하늘색 안개 배율 (대신 푸른 공기 색에 잠김)
     mountainScale: 0.55,                        // 먼 산맥 높이 배율 (지평선 위로 낮게 깔리게)
+    // 캐릭터 그림체 (야숨풍). 없는 값은 예전 그대로 (useWorld의 기본값)
+    // soft 명암 경계 너비, shade 그늘 밝기, lit 밝은 면 밝기, sky 그늘이 하늘·땅빛을 받는 정도,
+    // rim 윤곽 빛, grad 밝은 면의 둥근 그러데이션, metal 금속 대비, sheer 망토에 비치는 햇빛
+    cel: { soft: 0.11, shade: 1.12, lit: 1.8, sky: 0.5, rim: 0.3, grad: 0.12, metal: 0.55, sheer: 0.3 },
+    outline: 0.8,                               // 캐릭터 외곽선 두께 배율 (기본 1)
+    outlineTone: [0.58, 1.0],                   // 외곽선 색: [그 부분 색을 몇 배로 어둡게, 그 색을 섞는 비율 (나머지는 검정)] (기본 [0.3, 0.8])
   },
   // 노을 진 저녁 숲: 낮게 깔린 주황빛 해, 보랏빛 하늘, 분홍빛 구름, 반딧불
   dusk: {
@@ -43,6 +49,7 @@ const LIGHTING = {
     particles: true,
     particleColor: [0.8, 1.0, 0.35],            // 반딧불 (연둣빛)
     grade: [1.1, 0.86, 0.84],                   // 화면 전체를 주홍빛 저녁 색으로
+    cel: { soft: 0.07, sky: 0.35, sheer: 0.5 }, // 캐릭터: 그늘은 보랏빛 하늘을 띠고, 해를 향해 걸으면 망토가 노을빛으로 비침
   },
   // 수정 동굴: 천장 구멍으로만 햇빛이 들고, 나머지는 횃불·수정 빛. 어둡고 푸른 공기
   cave: {
@@ -481,6 +488,9 @@ const Renderer = {
     gl.uniform3fv(u.uDimTint, (Skills.ult ? Skills.ult.pal : Weapons.cur).dark);
     gl.uniform1f(u.uWaterLevel, World.waterLevel === null ? -100 : World.waterLevel);
     gl.uniform1f(u.uCelAmbient, L.celAmbient ?? 1);
+    const cel = Object.assign({ soft: 0.03, shade: 0.95, lit: 2.0, sky: 0, rim: 0.45, grad: 0, metal: 1, sheer: 0 }, L.cel);   // 캐릭터 그림체 (테마에 없는 값은 예전 그대로)
+    gl.uniform4fv(u.uCelLook, [cel.soft, cel.shade, cel.lit, cel.sky]);
+    gl.uniform4fv(u.uCelLook2, [cel.rim, cel.grad, cel.metal, cel.sheer]);
     gl.uniform1f(u.uTerm, L.terminator ?? 0.22);          // 테마별 그림체 (값이 없는 테마는 예전 그대로)
     gl.uniform1f(u.uShadeDesat, L.shadeDesat ?? 0);
     gl.uniform1f(u.uLeafGlow, L.leafGlow ?? 0);
@@ -521,7 +531,8 @@ const Renderer = {
 
   // 관절로 움직이는 것들(기사·적·화살). 먼저 살짝 부풀린 뒷면을 어둡게 그려 외곽선을 만들고, 그 위에 그림
   drawParts(u, parts, proj, view, time) {
-    const gl = GL.gl, w = CONFIG.graphics.outline;
+    const L = LIGHTING[World.level.theme];
+    const gl = GL.gl, w = CONFIG.graphics.outline * (L.outline ?? 1);   // 테마별 두께 (숲은 야숨처럼 가늘게)
     if (w > 0) {
       const O = this.p.outline;
       gl.useProgram(O.prog);
@@ -530,6 +541,7 @@ const Renderer = {
       gl.uniform1f(O.u.uTime, time);
       gl.uniform1f(O.u.uGrass, 0);
       gl.uniform3fv(O.u.uColor, [0.05, 0.04, 0.06]);
+      gl.uniform2fv(O.u.uTone, L.outlineTone || [0.3, 0.8]);   // 테마별 외곽선 색 (숲은 그 부분 색을 어둡게만 → 거의 눈에 띄지 않는 부드러운 선)
       gl.cullFace(gl.FRONT);
       for (const part of parts) {
         if (part.mesh === 'face' || part.mesh === 'lids') continue;   // 눈·코·입은 외곽선 없이
