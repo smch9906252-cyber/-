@@ -25,6 +25,8 @@ const COLORS = {
   mushroomStem: rgb('#ece4d0'),
   grassBase: rgb('#435232', MAT.LEAF),     // 풀뿌리: 탁한 올리브 (너무 어두우면 풀밭이 얼룩덜룩)
   grassTip: rgb('#6f964e', MAT.LEAF),      // 풀끝: 볕 받으면 파스텔 연두
+  grassGoldBase: rgb('#5e5a30', MAT.LEAF), // 마른 풀뿌리: 짙은 황록
+  grassGoldTip: rgb('#c98f3e', MAT.LEAF),  // 마른 풀끝: 볕 받으면 금빛 (왕눈 들판처럼)
   petal: rgb('#f4f0e8'),
   flowerCenter: rgb('#f2b630'),
   steel: rgb('#dfe5ec', 1),
@@ -497,12 +499,13 @@ function grassBlade(b, rnd, bx, bz, h, w, baseC, tipC, windScale) {
   b.vert(m0, up, midC, wm); b.vert(m1, up, midC, wm); b.vert(tip, up, tipC, wt);
 }
 
-function buildGrassTuft(rnd) {
+// baseC·tipC: 뿌리·끝 색, tall: 키 배율 (마른 금빛 풀은 더 길고 가늘게)
+function buildGrassTuft(rnd, baseC = COLORS.grassBase, tipC = COLORS.grassTip, tall = 1) {
   const b = new MeshBuilder();
   for (let i = 0; i < 8; i++) {
     const a = rnd() * Math.PI * 2, r = rnd() * 0.13;
-    grassBlade(b, rnd, Math.cos(a) * r, Math.sin(a) * r, 0.25 + rnd() * 0.38, 0.03 + rnd() * 0.02,
-      vary(COLORS.grassBase, 0.2, rnd), vary(COLORS.grassTip, 0.25, rnd), 1);
+    grassBlade(b, rnd, Math.cos(a) * r, Math.sin(a) * r, (0.25 + rnd() * 0.38) * tall, (0.03 + rnd() * 0.02) / Math.sqrt(tall),
+      vary(baseC, 0.2, rnd), vary(tipC, 0.25, rnd), 1);
   }
   return b;
 }
@@ -925,6 +928,7 @@ const Models = {
     this.bush = buildBush(Utils.rng(15));
     this.rock = buildRock(Utils.rng(16));
     this.grass = buildGrassTuft(Utils.rng(17));
+    this.grassGold = buildGrassTuft(Utils.rng(18), COLORS.grassGoldBase, COLORS.grassGoldTip, 1.3);   // 금빛 마른 풀
     this.flower = buildFlower();
     this.fern = buildFern(Utils.rng(20));
     this.reeds = buildReeds(Utils.rng(24));

@@ -22,7 +22,9 @@ const CAVE_GROUND = {
 };
 const CRYSTAL_TINTS = [[0.45, 0.95, 1.25], [0.95, 0.55, 1.3]];   // 수정 색: 하늘빛 / 보랏빛 (빛 색도 같음)
 const TORCH_LIGHT = [2.6, 1.2, 0.42];                           // 횃불 빛 (주황)
-const FLOWER_COLORS = [[1, 1, 1], [1, 0.8, 0.15], [1, 0.4, 0.6], [0.65, 0.45, 1], [0.45, 0.65, 1]];
+const FLOWER_COLORS = [[1, 1, 1], [1, 0.8, 0.15], [1, 0.4, 0.6], [0.42, 0.3, 1.15], [0.14, 0.26, 1.2]];
+// 파란 들꽃 (수레국화 파랑 / 연보랏빛). 꽃잎이 흰색이라 햇빛에 하얗게 바래지 않도록 아주 진하게 곱함
+const BLUE_FLOWERS = [[0.08, 0.18, 1.2], [0.25, 0.2, 1.2]];
 
 // 모델별 그리기 설정
 //   thin: 얇은 잎(양면, 그림자 없음)  grass: 바람 물결·전사 주변에서 눕기  ao: 밑동을 어둡게 할 높이(m)  rim: 윤곽 빛
@@ -30,7 +32,7 @@ const FLOWER_COLORS = [[1, 1, 1], [1, 0.8, 0.15], [1, 0.4, 0.6], [0.65, 0.45, 1]
 const PROP_STYLE = {
   pineA: { ao: 2.5, rim: 0.4 }, pineB: { ao: 2.5, rim: 0.4 }, oakA: { ao: 2.5, rim: 0.4 }, oakB: { ao: 2.5, rim: 0.4 },
   birch: { ao: 2.5, rim: 0.4 }, bush: { ao: 1, rim: 0.3 }, rock: { ao: 1.2, rim: 0.3 }, log: { rim: 0.2, dist: 60 },
-  mushroom: { rim: 0.3, dist: 35 }, grass: { thin: true, grass: true, dist: 50 }, flower: { thin: true, grass: true, dist: 40 },
+  mushroom: { rim: 0.3, dist: 35 }, grass: { thin: true, grass: true, dist: 50 }, grassGold: { thin: true, grass: true, dist: 50 }, flower: { thin: true, grass: true, dist: 40 },
   fern: { thin: true, grass: true, dist: 50 }, reeds: { thin: true, grass: true, dist: 60 }, lily: { thin: true, dist: 60 },
   pebbles: { rim: 0.2, dist: 30 }, litter: { thin: true, dist: 40 }, ruin: { ao: 2, rim: 0.3 }, gate: { rim: 0.3 },
   cliffRock: { ao: 4, rim: 0.15 }, stalagmite: { ao: 1.5, rim: 0.2 }, stalactite: { rim: 0.1 }, crystal: { rim: 0.3 },
@@ -202,7 +204,16 @@ const World = {
       const wet = Utils.smooth((this.waterLevel + 0.25 - this.groundHeight(x, z)) / 0.3);
       col = Utils.mixColor(col, G.mud, wet);
     }
+    col[3] = this.goldAmount(x, z);   // 네 번째 값 = 금빛 마른 풀밭 정도 (셰이더가 붓 자국 경계로 칠함)
     return col;
+  },
+
+  // 금빛 마른 풀밭인 정도 (0~1): 탁 트인 풀밭에 큰 얼룩으로. 숲 바닥·흙길·물가·동굴엔 없음
+  goldAmount(x, z) {
+    if (this.cave || this.pondNear(x, z)) return 0;
+    const n = Utils.fbm2(x * 0.06 + 40, z * 0.06 - 25, 3);
+    const open = 1 - this.blend(x, z, (c) => c === '#');
+    return Utils.clamp((n - 0.46) * 5, 0, 1) * open * open * (1 - this.dirtAmount(x, z));
   },
 
   // 동굴 천장 높이 (m). 넓은 곳 가운데는 높고 벽 쪽으로 낮아짐. 동굴이 아니면 무한히 높음
@@ -281,6 +292,7 @@ const World = {
   // 맵 문자를 보고 나무·바위·풀 등을 배치해 3D 모델로 만듦
   build() {
     const rnd = Utils.rng(7);
+    const deco = Utils.rng(8);   // 금빛 풀·파란 꽃 무더기용 난수 (따로 써서 기존 나무·바위 배치가 바뀌지 않게)
     const inst = {};
     for (const name in PROP_STYLE) inst[name] = [];
     const shadeAt = [];   // 땅에 드리우는 은은한 그늘 [x, z, 반지름, 세기]
@@ -425,13 +437,32 @@ const World = {
         }
         if (ch === 'f') this.flowerSpots.push([x0 + CELL / 2, this.groundHeight(x0 + CELL / 2, z0 + CELL / 2), z0 + CELL / 2]);
         const flowers = ch === 'f' ? 16 : rnd() < 0.15 ? 1 : 0;
+        const main = ch === 'f' && deco() < 0.65 ? BLUE_FLOWERS[(deco() * BLUE_FLOWERS.length) | 0] : null;   // 꽃밭은 대부분 한 가지 파란 꽃으로
         for (let k = 0; k < flowers; k++) {
           const x = rx(), z = rz();
-          if (this.dirtAmount(x, z) < 0.3 && !this.isWet(x, z)) put('flower', x, z, 0.8 + rnd() * 0.5, FLOWER_COLORS[(rnd() * FLOWER_COLORS.length) | 0], 0);
+          if (this.dirtAmount(x, z) < 0.3 && !this.isWet(x, z)) {
+            const s = 0.8 + rnd() * 0.5, c = FLOWER_COLORS[(rnd() * FLOWER_COLORS.length) | 0];   // (rnd 순서는 예전 그대로)
+            put('flower', x, z, s, main && deco() < 0.8 ? main : c, 0);
+          }
+        }
+        // 금빛 풀밭 가장자리엔 파란 들꽃 무더기 (위치·색·방향 모두 deco 난수)
+        const cg = this.goldAmount(x0 + CELL / 2, z0 + CELL / 2);
+        if (cg > 0.15 && cg < 0.75 && deco() < 0.35) {
+          const bx = x0 + 0.4 + deco() * (CELL - 0.8), bz = z0 + 0.4 + deco() * (CELL - 0.8);
+          const bc = BLUE_FLOWERS[(deco() * BLUE_FLOWERS.length) | 0];
+          for (let k = 0, n = 4 + ((deco() * 5) | 0); k < n; k++) {
+            const x = bx + (deco() - 0.5) * 0.9, z = bz + (deco() - 0.5) * 0.9;
+            if (this.dirtAmount(x, z) < 0.3 && !this.isWet(x, z)) put('flower', x, z, 1.0 + deco() * 0.6, bc, 0, null, deco() * Math.PI * 2);
+          }
         }
         for (let k = 0; k < tufts; k++) {
           const x = x0 + rnd() * CELL, z = z0 + rnd() * CELL;
-          if (this.dirtAmount(x, z) < 0.35 + rnd() * 0.2 && !this.isWet(x, z)) put('grass', x, z, 0.7 + rnd() * 0.7, shade(0.35), 0.02);
+          if (this.dirtAmount(x, z) < 0.35 + rnd() * 0.2 && !this.isWet(x, z)) {
+            // 금빛 풀밭 위는 금빛 마른 풀 (경계에선 섞여 들쭉날쭉), 그 밖에도 드문드문 한 포기씩
+            const g = this.goldAmount(x, z);
+            const dry = deco() < g * 1.3 - 0.15 || deco() < 0.03;
+            put(dry ? 'grassGold' : 'grass', x, z, 0.7 + rnd() * 0.7, shade(0.35), 0.02);
+          }
         }
       }
     }
