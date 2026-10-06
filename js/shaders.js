@@ -186,6 +186,7 @@ uniform vec3 uPlayerPos;   // 용사 위치 (y = 가슴 높이): 카메라와 �
 uniform float uTime;
 uniform float uWaterLevel; // 연못 수면 높이 (물속 바닥에 빛 무늬)
 uniform float uMistBase;   // 이 높이 근처 낮은 곳에 옅은 물안개
+uniform vec4 uHaze;        // 공기 원근감: rgb 먼 언덕·산이 잠기는 푸른 공기 색, w 짙기 (0이면 끔: 노을·동굴)
 uniform float uAlphaOut;   // 출력 알파: 0 = 세상 물체, 0.25 = 1인칭 손·검 (후처리에서 구분)
 uniform float uFlash;      // 맞았을 때 하얗게 번쩍 (0~1)
 uniform float uTwoSided;   // 1이면 뒷면도 제대로 (망토 안쪽은 안감 색)
@@ -373,9 +374,19 @@ void main() {
   col = mix(col, vec3(2.4), uFlash);
   float dist = length(vWorld - uCamPos);
   float fog = 1.0 - exp(-pow(dist * uFogDensity, 2.0));
-  col = mix(col, sunFog(uFogColor, -v, uSunDir), fog);
+  vec3 fogC = sunFog(uFogColor, -v, uSunDir);
+  if (uHaze.w > 0.0) {
+    // 공기 원근감: 멀수록 색이 바래고 대비가 줄다가, 먼 언덕·산은 푸른 공기 색에 잠김
+    // 높은 곳은 공기가 옅어 덜 흐려짐 → 산등성이가 겹겹이 보임
+    float farK = smoothstep(25.0, 260.0, dist);
+    float air = 1.0 - exp(-max(dist - 20.0, 0.0) * uHaze.w * exp(-max(vWorld.y, 0.0) * 0.003));
+    col = mix(col, vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), air * 0.55);
+    col = mix(col, uHaze.rgb, air * farK);
+    fogC = mix(vec3(dot(fogC, vec3(0.2126, 0.7152, 0.0722))), fogC, 0.15 + 0.85 * farK);   // 가까운 안개는 무채색에 가깝게 (초록 숲이 청록으로 물들지 않게)
+  }
+  col = mix(col, fogC, fog);
   float mist = (1.0 - exp(-dist * 0.04)) * exp(-max(vWorld.y - uMistBase, 0.0) * 1.6) * 0.3;
-  col = mix(col, uFogColor * 1.1, mist);
+  col = mix(col, (uHaze.w > 0.0 ? fogC : uFogColor) * 1.1, mist);   // 물안개 (공기 원근감이 있으면 희뿌옇게)
   if (mat != 6) col = mix(col, col * pow(uDimTint, vec3(2.2)) * 0.6, uDim);   // (물들일 색은 화면 밝기 기준이라 빛 계산용으로 바꿔서 곱함)
   outColor = vec4(finish(col), uAlphaOut);   // 알파: 0 = 물체, 1 = 하늘 (빛줄기 계산에 사용)
 }`,
@@ -522,7 +533,13 @@ void main() {
 }`,
 
   // 하늘: 바라보는 방향의 하늘색 + 해 + 뭉게구름
-  skyVS: FULLSCREEN_VS,
+  skyVS: `#version 300 es
+out vec2 vNdc;
+void main() {
+  vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);
+  vNdc = p;
+  gl_Position = vec4(p, 1.0, 1.0);   // 가장 먼 깊이(1)에 그림 → 물체 뒤에 가려진 하늘은 계산을 건너뜀
+}`,
 
   skyFS: `#version 300 es
 precision highp float;

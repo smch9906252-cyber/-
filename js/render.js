@@ -8,7 +8,7 @@ const LIGHTING = {
     sunColor: [1.6, 1.48, 1.2],                 // 햇빛 (부드러운 금빛. 너무 세면 풀이 형광 연두로 타 버림)
     skyColor: [0.42, 0.44, 0.48],               // 위에서 오는 하늘빛 (흰빛에 가까운 옅은 푸른빛)
     groundColor: [0.3, 0.33, 0.18],             // 아래에서 반사되는 땅빛 (밝은 풀밭의 연둣빛이 나무 밑면을 밝힘)
-    fogColor: [0.32, 0.5, 0.8],                 // 안개 = 지평선 하늘 색 (옅은 하늘색, 멀수록 푸르스름)
+    fogColor: [0.3, 0.5, 0.95],                 // 안개 = 지평선 하늘 색 (옅은 물빛 하늘: 하얗게 바래지 않고 맑게)
     zenith: [0.2, 0.32, 0.61],                  // 머리 위 하늘 색 (맑고 옅은 파랑)
     cloudLit: [1.3, 1.24, 1.15],                // 구름의 볕 받은 쪽 색
     cloudShade: [0.58, 0.64, 0.78],             // 구름 그늘 색
@@ -24,7 +24,10 @@ const LIGHTING = {
     split: 0.7,                                 // 그늘은 푸르게·밝은 곳은 따뜻하게 나누는 정도 (기본 1)
     lift: [0.015, 0.02, 0.03],                  // 어두운 곳을 하늘빛으로 살짝 띄움 (흐린 물감 느낌)
     aoStrength: 0.6,                            // 주변 가림 세기 (기본 0.85)
-    farHaze: 1.35,                              // 먼 산 안개 배율 (멀수록 푸르게 흐려짐)
+    haze: [0.17, 0.25, 0.42, 0.007],            // 공기 원근감: 먼 언덕·산이 잠기는 푸른 공기 색 + 짙기
+    fogScale: 0.85,                             // 가까운 안개는 조금 옅게 (먼 곳은 공기 원근감이 맡음)
+    farFog: 0.7,                                // 먼 산·언덕 모델의 하늘색 안개 배율 (대신 푸른 공기 색에 잠김)
+    mountainScale: 0.55,                        // 먼 산맥 높이 배율 (지평선 위로 낮게 깔리게)
   },
   // 노을 진 저녁 숲: 낮게 깔린 주황빛 해, 보랏빛 하늘, 분홍빛 구름, 반딧불
   dusk: {
@@ -297,12 +300,12 @@ const Renderer = {
     Post.begin(W, H);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    const skyVP = this.drawSky(proj, view, L, time);
     const u = this.drawWorld(proj, view, lightVP, eye, L, time, player);
     const blink = player.hurtTimer > 0 && Math.floor(time * 16) % 2 === 0;   // 맞은 직후 깜빡임
     const showBody = !Camera.isFirst && !blink;
     this.drawParts(u, showBody ? body.concat(foes) : foes, proj, view, time);
     if (showBody && Cape.mesh) this.drawCape(u);
+    const skyVP = this.drawSky(proj, view, L, time);   // 하늘은 불투명한 물체 다음에 (가려진 곳은 계산을 건너뜀), 빛을 더하는 효과·물보다는 먼저
     if (!Camera.isFirst && Character.ghosts.length) this.drawGhosts(proj, view, eye, time);
     if (World.water) this.drawWater(proj, view, lightVP, eye, L, time);
     if (World.gate) this.drawGateFX(proj, view, eye, time);
@@ -391,12 +394,14 @@ const Renderer = {
     gl.uniform3fv(P.u.uDimTint, (Skills.ult ? Skills.ult.pal : Weapons.cur).dark);
     gl.uniform3fv(P.u.uCloudLit, L.cloudLit);
     gl.uniform3fv(P.u.uCloudShade, L.cloudShade);
-    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.CULL_FACE);   // 물에 비친 장면(앞뒷면을 뒤집어 그림)에서도 하늘이 빠지지 않게
+    gl.depthFunc(gl.LEQUAL);    // 깊이는 검사만: 가장 먼 깊이에 그리면 이미 물체가 있는 곳은 건너뜀
     gl.depthMask(false);
     gl.bindVertexArray(this.skyVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.depthMask(true);
-    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LESS);
+    gl.enable(gl.CULL_FACE);
     return vp;
   },
 
@@ -454,6 +459,7 @@ const Renderer = {
     gl.uniform3fv(u.uSkyColor, L.skyColor);
     gl.uniform3fv(u.uGroundColor, L.groundColor);
     gl.uniform3fv(u.uFogColor, L.fogColor);
+    gl.uniform4fv(u.uHaze, L.haze || [0, 0, 0, 0]);   // 공기 원근감 (테마에 없으면 끔)
     gl.uniform3fv(u.uCamPos, eye);
     gl.uniform3fv(u.uPlayerPos, [player.x, player.groundY + 1.1, player.z]);   // (풀은 x·z만 씀)
     gl.uniform1f(u.uFogDensity, this.fog);
@@ -500,7 +506,7 @@ const Renderer = {
       gl.uniform1f(u.uAOHeight, m.ao || 0);
       gl.uniform1f(u.uGrass, m.grass ? 1 : 0);
       gl.uniform1f(u.uRim, m.rim || 0);
-      gl.uniform1f(u.uFogDensity, m.fog || this.fog);
+      gl.uniform1f(u.uFogDensity, m.fog ? m.fog * (L.farFog ?? 1) : this.fog);   // 먼 산·언덕은 따로 정한 안개 (테마별 배율)
       gl.uniform1f(u.uCamFade, !Camera.isFirst && !m.ground ? 1 : 0);
       GL.drawMesh(m.mesh, test);
     }
@@ -619,7 +625,7 @@ const Renderer = {
       gl.uniform1f(u.uGroundDetail, m.ground ? 1 : 0);
       gl.uniform1f(u.uAOHeight, m.ao || 0);
       gl.uniform1f(u.uRim, m.rim || 0);
-      gl.uniform1f(u.uFogDensity, m.fog || this.fog);
+      gl.uniform1f(u.uFogDensity, m.fog ? m.fog * (L.farFog ?? 1) : this.fog);   // 물에 비친 먼 산도 같은 안개
       GL.drawMesh(m.mesh, test);
     }
     gl.enable(gl.CULL_FACE);

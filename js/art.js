@@ -42,8 +42,8 @@ const COLORS = {
   rune: rgb('#58c8ff', MAT.GLOW),
   gem: rgb('#2f8cff', MAT.GLOW),
   blueLeather: rgb('#1f3358'),
-  snow: rgb('#f2f5fa'),
-  cliff: rgb('#7d838e'),
+  snow: rgb('#d3dce8'),     // 먼 산의 눈 (햇빛에 하얗게 타지 않게 살짝 푸른 회색)
+  cliff: rgb('#6c7484'),    // 먼 산 바위 (서늘한 청회색)
   farForest: rgb('#46644c'),            // 먼 숲 (안개에 섞이면 푸르스름한 회녹색)
   caveRock: rgb('#6b655d', MAT.ROCK),     // 동굴 바위 (따뜻한 회갈색)
   caveCeil: rgb('#4a4540', MAT.ROCK),     // 동굴 천장 (더 어둡게)
@@ -709,19 +709,21 @@ function ringTerrain(cx, cz, radii, N, heightAt, colorAt) {
 }
 
 // 먼 산맥: 맵 중심(cx, cz)을 크게 둘러싼 고리. 부드러운 능선, 아래는 푸른 숲 → 바위 → 눈
-function buildMountains(cx, cz) {
+// k: 높이 배율 (테마의 mountainScale, 작을수록 지평선 위로 낮게 깔려 하늘이 넓게 보임)
+function buildMountains(cx, cz, k = 1) {
   const radii = [180, 210, 245, 285, 330, 380, 440, 500];
   const env = [0, 0.3, 0.65, 0.9, 1, 0.9, 0.7, 0.45];
   const height = (x, z, j) => {
     const a = Math.atan2(z - cz, x - cx), R = radii[j], u = Math.cos(a), v = Math.sin(a);
     const n = Utils.fbm2(u * 2.2 + R * 0.003 + 10, v * 2.2 + R * 0.003 - 4, 5);
-    return -6 + (Math.pow(1 - Math.abs(n * 2 - 1), 1.6) * 230 + n * 50) * env[j];
+    return -6 + (Math.pow(1 - Math.abs(n * 2 - 1), 1.6) * 230 + n * 50) * env[j] * k;
   };
   const color = (p, n) => {
+    const y = p[1] / k;                            // 배율을 되돌린 높이 (눈·바위 경계가 산 모양을 그대로 따라가게)
     const snowLine = 120 + (Utils.noise2(p[0] * 0.02, p[2] * 0.02) - 0.5) * 50;
-    const steep = 1 - n[1];
-    const c = Utils.mixColor(COLORS.farForest, COLORS.cliff, Utils.smooth((p[1] - 25) / 40 + steep * 1.2));
-    return Utils.mixColor(c, COLORS.snow, Utils.smooth((p[1] - snowLine) / 25) * (1 - Utils.smooth((steep - 0.5) * 3)));
+    const steep = Math.min(1, (1 - n[1]) / k);     // 낮춘 만큼 완만해진 경사를 대략 되돌림
+    const c = Utils.mixColor(COLORS.farForest, COLORS.cliff, Utils.smooth((y - 25) / 40 + steep * 1.2));
+    return Utils.mixColor(c, COLORS.snow, Utils.smooth((y - snowLine) / 25) * (1 - Utils.smooth((steep - 0.5) * 3)));
   };
   return ringTerrain(cx, cz, radii, 220, height, color);
 }

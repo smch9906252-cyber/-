@@ -447,7 +447,7 @@ const World = {
     }
     this.meshes = [{ mesh: GL.createMesh(this.buildGround(shadeAt)), cull: true, ground: true }];
     if (cave) this.meshes.push({ mesh: GL.createMesh(this.buildCeiling()), cull: false, shadow: true, ao: 0 });
-    else this.meshes.push({ mesh: GL.createMesh(buildMountains((this.cols * CELL) / 2, (this.rows * CELL) / 2)), cull: false, fog: 0.0019 * (LIGHTING[this.level.theme].farHaze || 1) });   // 먼 산은 테마별로 더 흐리게 (공기 원근감)
+    else this.meshes.push({ mesh: GL.createMesh(buildMountains((this.cols * CELL) / 2, (this.rows * CELL) / 2, LIGHTING[this.level.theme].mountainScale || 1)), cull: false, fog: 0.0019 });   // 산 높이는 테마별 (숲은 지평선 위로 낮게)
     for (const name in inst) {
       if (!inst[name].length) continue;
       const st = PROP_STYLE[name];
