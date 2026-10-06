@@ -11,7 +11,11 @@ const LIGHTING = {
     fogColor: [0.3, 0.5, 0.95],                 // 안개 = 지평선 하늘 색 (옅은 물빛 하늘: 하얗게 바래지 않고 맑게)
     zenith: [0.2, 0.32, 0.61],                  // 머리 위 하늘 색 (맑고 옅은 파랑)
     cloudLit: [1.3, 1.24, 1.15],                // 구름의 볕 받은 쪽 색
-    cloudShade: [0.58, 0.64, 0.78],             // 구름 그늘 색
+    cloudShade: [0.26, 0.31, 0.42],             // 구름 그늘 색 (화면 보정에서 밝게 눌리므로 짙게 잡아야 푸른 회색으로 보임)
+    cumulus: 1,                                 // 지평선 뭉게구름 양 (0이면 없음)
+    cumulusBase: 0.15,                          // 구름 밑동 높이 (낮춘 산맥 바로 뒤에 숨음, 0 = 지평선)
+    cumulusTop: 0.7,                            // 가장 높이 솟은 구름 꼭대기 (그 위 하늘은 맑게)
+    wisps: 0.6,                                 // 높은 하늘의 새털구름 양
     rays: 1,                                    // 빛줄기 세기
     particles: true,                            // 떠다니는 빛 알갱이
     particleColor: [1.0, 0.93, 0.65],           // 꽃가루 (금빛)
@@ -43,8 +47,12 @@ const LIGHTING = {
     groundColor: [0.16, 0.09, 0.07],
     fogColor: [0.95, 0.58, 0.45],
     zenith: [0.12, 0.13, 0.42],
-    cloudLit: [1.5, 0.9, 0.6],
-    cloudShade: [0.44, 0.34, 0.56],
+    cloudLit: [1.25, 0.62, 0.38],               // 노을빛 받은 쪽 (너무 밝으면 화면 보정에서 하얗게 바램)
+    cloudShade: [0.3, 0.2, 0.36],               // 보랏빛 그늘
+    cumulus: 0.85,
+    cumulusBase: 0.3,                           // 이 장의 산맥은 높아서 구름 밑동도 높게
+    cumulusTop: 0.8,
+    wisps: 0.5,
     rays: 1.5,
     particles: true,
     particleColor: [0.8, 1.0, 0.35],            // 반딧불 (연둣빛)
@@ -69,6 +77,8 @@ const LIGHTING = {
     grade: [0.92, 0.98, 1.1],                   // 화면 전체를 서늘하게
     shadowOutside: 0,                           // 그림자 지도 바깥 = 천장에 가린 어둠
     clouds: false,
+    cumulus: 0,                                 // 구멍 너머 하늘은 구름 없이 (계산도 아낌)
+    wisps: 0,
     celAmbient: 0.4,                            // 캐릭터 그늘도 어둡게
   },
 };
@@ -401,6 +411,7 @@ const Renderer = {
     gl.uniform3fv(P.u.uDimTint, (Skills.ult ? Skills.ult.pal : Weapons.cur).dark);
     gl.uniform3fv(P.u.uCloudLit, L.cloudLit);
     gl.uniform3fv(P.u.uCloudShade, L.cloudShade);
+    gl.uniform4f(P.u.uCloudCfg, L.cumulus ?? 1, L.cumulusTop ?? 0.7, L.wisps ?? 0.6, L.cumulusBase ?? 0.15);   // 구름 설정 (테마에 없으면 맑은 낮 숲 값)
     gl.disable(gl.CULL_FACE);   // 물에 비친 장면(앞뒷면을 뒤집어 그림)에서도 하늘이 빠지지 않게
     gl.depthFunc(gl.LEQUAL);    // 깊이는 검사만: 가장 먼 깊이에 그리면 이미 물체가 있는 곳은 건너뜀
     gl.depthMask(false);

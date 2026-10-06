@@ -112,7 +112,7 @@ float cloudShadow(vec3 w) {
   if (uClouds < 0.5) return 1.0;
   vec2 p = w.xz * 0.015 + uTime * vec2(0.02, 0.008);
   float c = vnoise(p) * 0.55 + vnoise(p * 2.1 + 7.3) * 0.3 + vnoise(p * 4.3 - 2.1) * 0.15;
-  return 1.0 - smoothstep(0.5, 0.68, c) * 0.5;
+  return 1.0 - smoothstep(0.5, 0.68, c) * 0.3;   // (머리 위 하늘은 대체로 맑아서 그늘도 옅게)
 }
 // 물속 바닥에 일렁이는 빛 그물 무늬
 float caustic(vec2 p) {
@@ -589,9 +589,18 @@ uniform float uDim;        // 궁극기 때 하늘을 어둡게 물들임 (0~1) 
 uniform vec3 uDimTint;
 uniform vec3 uCloudLit;    // 구름의 볕 받은 쪽 / 그늘 색 (낮: 흰색·푸른 회색, 노을: 주황·보라)
 uniform vec3 uCloudShade;
+uniform vec4 uCloudCfg;    // x 뭉게구름 양 (0이면 없음), y 구름 꼭대기 높이, z 새털구름 양, w 구름 밑동 높이 (산 뒤에 숨는 곳)
 out vec4 outColor;
 ${GLSL_NOISE}
 ${GLSL_FINISH}
+// 뭉게구름의 큰 덩어리 무늬 (3겹). 겹마다 t만큼 반대로 밀려 모양이 천천히 바뀜
+float cloudLo(vec2 p, float t) {
+  return vnoise(p) * 0.5 + vnoise(p * 2.03 + vec2(5.2, 1.3) + t) * 0.25 + vnoise(p * 4.1 + vec2(-3.7, 8.1) - t) * 0.125;
+}
+// 높이에 따른 문턱: 밑동은 빽빽하고 위로 갈수록 줄어 꼭대기가 둥글게 솟음
+float cloudThr(float rel) {
+  return 0.16 + 0.42 * rel * rel + (1.0 - uCloudCfg.x) * 0.25;
+}
 void main() {
   vec4 p = uInvVP * vec4(vNdc, 1.0, 1.0);
   vec3 dir = normalize(p.xyz / p.w);
@@ -600,20 +609,55 @@ void main() {
   vec3 col = mix(horizon, uZenith, pow(smoothstep(-0.02, 0.6, y), 0.8));
   float sd = max(dot(dir, uSunDir), 0.0);
   col += uSunColor * (pow(sd, 1500.0) * 40.0 + pow(sd, 60.0) * 0.4 + pow(sd, 6.0) * 0.07);
-  if (y > 0.0) {
-    // 뭉게구름: 무늬를 비틀어 몽실몽실하게, 해 쪽으로 살짝 옮겨 본 값과 비교해 아래는 그늘지게
-    vec2 uv = dir.xz / (y + 0.12) * 0.9 + uTime * vec2(0.01, 0.004);
-    vec2 q = vec2(fbm(uv), fbm(uv + 5.2));
-    float c = fbm(uv + q * 0.8);
-    float cover = smoothstep(0.5, 0.72, c) * smoothstep(0.0, 0.2, y);
-    float lit = clamp((c - fbm(uv + q * 0.8 + uSunDir.xz * 0.12)) * 5.0 + 0.55, 0.0, 1.0);
-    vec3 cloud = mix(uCloudShade, uCloudLit, lit);
-    cloud += uSunColor * pow(sd, 6.0) * 0.5 * (1.0 - smoothstep(0.5, 0.9, c));   // 해 근처 금빛 테두리
-    col = mix(col, cloud, cover);
+
+  // 새털구름: 높은 하늘에 바람결 따라 가늘게 늘어진 구름 몇 가닥
+  if (uCloudCfg.z > 0.0 && y > 0.2) {
+    vec2 wp = dir.xz / (y + 0.6) * 4.0;
+    vec2 a = vec2(dot(wp, vec2(0.94, 0.33)) * 0.7 + uTime * 0.006, dot(wp, vec2(-0.33, 0.94)) * 3.0);
+    float w = vnoise(a) * 0.55 + vnoise(a * 2.3 + 4.1) * 0.3 + vnoise(a * 5.1 + 9.3) * 0.15;
+    float m = vnoise(wp * 0.6 + vec2(2.0, uTime * 0.002));   // 하늘 곳곳에 몇 무리만
+    float wa = smoothstep(0.62, 0.84, w) * smoothstep(0.55, 0.8, m) * smoothstep(0.25, 0.55, y) * uCloudCfg.z * 0.5;
+    col = mix(col, mix(uCloudShade, uCloudLit, 0.85) + uSunColor * pow(sd, 6.0) * 0.4, wa);
+  }
+
+  // 뭉게구름: 산 너머 지평선에서 크게 솟아오른 구름 무더기 (밑동은 산 뒤에 숨음)
+  float base = uCloudCfg.w, top = uCloudCfg.y, cloudA = 0.0;
+  if (uCloudCfg.x > 0.0 && y > -0.03 && y < top + 0.04) {
+    vec2 h = dir.xz / max(length(dir.xz), 1e-4);   // 수평 방향
+    float ang = uTime * 0.003;                     // 지평선을 따라 천천히 흘러감
+    vec2 n = vec2(h.x * cos(ang) - h.y * sin(ang), h.x * sin(ang) + h.y * cos(ang));
+    vec2 tg = vec2(-n.y, n.x);
+    // 방향은 원 둘레, 높이는 바깥쪽으로 펼쳐 무늬를 읽음 → 이음매 없이 한 바퀴, 덩어리가 둥근 모양 그대로
+    float r = 2.2 * exp(y - base);
+    vec2 q = n * r;
+    float t = uTime * 0.01;
+    // 방향마다 구름 기둥 높이가 다름 → 높이 솟은 무더기, 낮은 띠, 사이사이 맑은 틈
+    float tall = max(0.22 + (top - base - 0.22) * smoothstep(0.2, 0.85, vnoise(n * 1.3 + 7.1)), 0.05);
+    float rel = max(y - base, 0.0) / tall;
+    float lo = cloudLo(q, t);
+    float hi = vnoise(q * 8.3 + vec2(11.3, -6.1)) * 0.0625 + vnoise(q * 16.9 + vec2(-9.4, 2.7)) * 0.031;
+    float dens = lo + hi - cloudThr(rel);
+    float cover = smoothstep(0.0, 0.1, dens);
+    if (cover > 0.0) {
+      // 해 쪽(조금 위로 치우침)으로 한 걸음 옮겨 본 구름: 앞이 비어 있으면 볕 받는 면, 막혀 있으면 그늘
+      vec2 l = normalize(vec2(dot(uSunDir.xz, vec2(-h.y, h.x)), uSunDir.y + 0.2)) * 0.35;
+      float loS = cloudLo(q + tg * l.x + n * l.y, t);
+      float relS = max(y + l.y / r - base, 0.0) / tall;
+      float lit = (1.0 - smoothstep(-0.02, 0.35, loS + 0.047 - cloudThr(relS))) * 0.45
+                + clamp(0.5 + (lo - loS) * 6.0, 0.0, 1.0) * 0.35   // 덩어리마다 해 쪽은 밝게
+                + min(rel, 1.0) * 0.2;                             // 위쪽일수록 밝고 밑은 푸른 회색
+      lit += (hi - 0.047) * 5.0 - dot(uSunDir.xz, h) * 0.15;      // 잔 몽실몽실 결, 해를 마주하면 역광
+      lit = smoothstep(0.35, 0.85, lit);                           // 부드러운 두 톤
+      vec3 cloud = mix(uCloudShade, uCloudLit, lit);
+      cloud += uSunColor * ((1.0 - smoothstep(0.0, 0.2, dens)) * pow(sd, 5.0) * 0.8 + pow(sd, 14.0) * 0.25);   // 해 쪽 가장자리 은빛 테두리
+      cloud = mix(cloud, horizon, (1.0 - smoothstep(0.0, 0.5, rel)) * 0.2 + (1.0 - smoothstep(0.0, 0.25, y)) * 0.3);   // 밑동은 먼 공기에 묻힘
+      col = mix(col, cloud, cover);
+      cloudA = cover;
+    }
   }
   col = mix(col, horizon, smoothstep(0.06, -0.02, y));
   col = mix(col, col * pow(uDimTint, vec3(2.2)) * 0.4, uDim);
-  outColor = vec4(finish(col), 1.0);   // 알파 1 = 하늘
+  outColor = vec4(finish(col), 1.0 - 0.15 * cloudA);   // 알파 1 = 맑은 하늘, 0.85 = 두꺼운 구름 (해를 가리면 빛줄기·렌즈 빛이 구름 틈에서만 나옴)
 }`,
 
   // 떠다니는 꽃가루 (카메라 주변을 반복해서 채움)
