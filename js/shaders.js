@@ -1099,7 +1099,7 @@ void main() {
   vec3 c = sc.rgb;
   float aoMask = (sc.a > 0.2 && sc.a < 0.3) ? 0.0 : 1.0;   // 1인칭 손·검에는 주변 가림을 넣지 않음
   c *= mix(1.0, texture(uAO, vUv).r, uAOStrength * aoMask);
-  float sky = step(0.9, sc.a);                                 // 하늘 (알파 1)
+  float sky = smoothstep(0.6, 0.84, sc.a);                     // 하늘 (맑은 하늘 1, 두꺼운 구름 0.85 → 구름도 하늘로 셈. 구름에 가린 해는 빛줄기·렌즈 빛에서만 따로 봄)
   if (uDof.z > 0.0 || uVeilK.z > 0.0) {
     highp float z = linZ(texture(uDepth, vUv).r);
     if (uDof.z > 0.0) {   // 먼 숲·산은 물감이 번진 듯 부드럽게 (가까운 전사·나무는 또렷하게, 하늘은 덜)
@@ -1141,7 +1141,7 @@ void main() {
   }
   vec3 shadeT = uShadeTint.g > 0.0 ? uShadeTint : vec3(0.94, 1.0, 1.08);
   vec3 highT = uHighTint.g > 0.0 ? uHighTint : vec3(1.05, 1.0, 0.92);
-  float sp = uSplit * (1.0 - uSkyKeep * step(0.9, sc.a));     // 하늘은 제 색을 지킴
+  float sp = uSplit * (1.0 - uSkyKeep * sky);                  // 하늘·구름은 제 색을 지킴
   c = mix(c * mix(vec3(1.0), shadeT, sp), c * mix(vec3(1.0), highT, sp), smoothstep(0.2, 0.8, l));   // 그늘 색·밝은 곳 색 (기본: 그늘은 푸르게, 밝은 곳은 따뜻하게)
   float l2 = dot(c, vec3(0.2126, 0.7152, 0.0722));
   c = mix(c, vec3(l2), uDarkDesat * (1.0 - smoothstep(0.12, 0.6, l2)));   // 어두운 곳은 색을 조금 빼서 차분하게
