@@ -513,6 +513,13 @@ const Renderer = {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.leafTex);
     gl.uniform1i(u.uLeafTex, 1);
+    // 잎 판을 세울 방향 = 화면 오른쪽·위쪽 (물에 비친 장면은 좌우가 뒤집혀 있어 오른쪽을 반대로 → 앞면이 유지됨)
+    const bR = [view[0], view[4], view[8]], bU = [view[1], view[5], view[9]];
+    const flip = V3.dot(V3.cross(bR, bU), [view[2], view[6], view[10]]) < 0 ? -1 : 1;
+    gl.uniform3fv(u.uBillR, V3.scale(bR, flip));
+    gl.uniform3fv(u.uBillU, bU);
+    gl.uniform3fv(u.uGrassEye, eye);
+    gl.uniform2f(u.uGrassLod, 0, 0);
     return u;
   },
 
@@ -521,11 +528,17 @@ const Renderer = {
     const u = this.useWorld(proj, view, lightVP, eye, L, time, player);
     const planes = frustumPlanes(M4.multiply(proj, view));
     for (const m of World.meshes) {
-      const test = (box) => boxVisible(planes, box) && (!m.dist || boxDistance(box, eye) < m.dist);
+      const test = (box) => {
+        if (!boxVisible(planes, box)) return false;
+        if (!m.dist) return true;
+        const d = boxDistance(box, eye);
+        return d < m.dist && (!m.lod || d < m.lod || 0.5);   // 먼 풀 구역은 정점 앞 절반(큰 풀잎)만
+      };
       if (m.cull) gl.enable(gl.CULL_FACE); else gl.disable(gl.CULL_FACE);
       gl.uniform1f(u.uGroundDetail, m.ground ? 1 : 0);
       gl.uniform1f(u.uAOHeight, m.ao || 0);
       gl.uniform1f(u.uGrass, m.grass ? 1 : 0);
+      gl.uniform2f(u.uGrassLod, m.lod || 0, m.grass ? m.dist || 0 : 0);   // 풀·꽃·고사리는 그리는 거리 끝에서 땅으로 줄어듦
       gl.uniform1f(u.uRim, m.rim || 0);
       gl.uniform1f(u.uFogDensity, m.fog ? m.fog * (L.farFog ?? 1) : this.fog);   // 먼 산·언덕은 따로 정한 안개 (테마별 배율)
       gl.uniform1f(u.uCamFade, !Camera.isFirst && !m.ground ? 1 : 0);
@@ -536,6 +549,7 @@ const Renderer = {
     gl.uniform1f(u.uGroundDetail, 0);
     gl.uniform1f(u.uAOHeight, 0);
     gl.uniform1f(u.uGrass, 0);
+    gl.uniform2f(u.uGrassLod, 0, 0);
     gl.uniform1f(u.uFogDensity, this.fog);
     return u;
   },

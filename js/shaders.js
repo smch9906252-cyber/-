@@ -11,10 +11,15 @@ layout(location = 3) in float aWind;
 layout(location = 4) in vec4 aInst0;
 layout(location = 5) in vec4 aInst1;
 layout(location = 6) in vec2 aUV;
+layout(location = 7) in vec3 aCorner;   // 카메라 쪽으로 세우는 잎 판의 모서리 (x, y)와 크기 (보통 정점은 0)
 uniform mat4 uModel;
 uniform float uTime;
 uniform float uGrass;       // 1이면 풀: 바람 물결에 눕고, 전사 주변에서 밀려남
 uniform vec3 uPlayerPos;
+uniform vec3 uGrassEye;     // 카메라 위치 (먼 풀을 줄여 숨길 때)
+uniform vec2 uGrassLod;     // x: 이보다 먼 곳은 작은 풀잎을 없앰, y: 풀을 그리는 끝 거리 (0이면 끔)
+uniform vec3 uBillR;        // 잎 판을 세울 방향: 화면 오른쪽
+uniform vec3 uBillU;        // 화면 위쪽
 float gGust;                // 지금 이 자리를 지나는 바람 물결의 세기 (0~1)
 
 vec3 instRot(vec3 p) {
@@ -23,7 +28,17 @@ vec3 instRot(vec3 p) {
 }
 
 vec4 worldPos() {
-  vec4 w = uModel * vec4(instRot(aPos * aInst1.x) + aInst0.xyz, 1.0);
+  vec3 p = aPos;
+  float grow = 1.0;
+  if (uGrass > 0.5 && uGrassLod.y > 0.0) {
+    // 멀어질수록 풀을 땅속으로 줄여 숨김 (그리는 거리 끝에서 툭 끊기지 않게). 먼 구역에서 빠지는 작은 잎(무늬 좌표 x = 1)은 미리 줄여 둠
+    float d = distance(aInst0.xyz, uGrassEye);
+    grow = 1.0 - smoothstep(uGrassLod.y * 0.72, uGrassLod.y, d);
+    if (aUV.x > 0.5 && uGrassLod.x > 0.0) grow *= 1.0 - smoothstep(uGrassLod.x * 0.6, uGrassLod.x, d);
+    p.y *= grow;
+  }
+  vec4 w = uModel * vec4(instRot(p * aInst1.x) + aInst0.xyz, 1.0);
+  w.xyz += (uBillR * aCorner.x + uBillU * aCorner.y) * (aCorner.z * aInst1.x);   // 잎 판은 늘 보는 쪽을 향해 세움
   float ph = uTime * 1.7 + w.x * 0.31 + w.z * 0.23;
   float wave = sin(dot(w.xz, vec2(0.11, 0.06)) - uTime * 1.4) * 0.5 + 0.5;
   gGust = wave * wave * wave;
@@ -34,7 +49,7 @@ vec4 worldPos() {
     float dl = length(d);
     sway += d / max(dl, 0.001) * smoothstep(1.2, 0.2, dl) * 3.5;   // 전사가 지나가면 밀려남
   }
-  vec2 off = aWind * sway;
+  vec2 off = aWind * grow * sway;
   w.xz += off;
   w.y -= length(off) * 0.35;
   return w;
@@ -80,15 +95,19 @@ uniform mat4 uLightVPNear;
 uniform highp sampler2DShadow uShadowMap;
 uniform highp sampler2DShadow uShadowNear;
 uniform float uShadowOutside;   // 그림자 지도 바깥의 밝기 (숲 1 = 햇빛, 동굴 0 = 천장에 가려 어두움)
-const vec2 POISSON[12] = vec2[12](
-  vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457), vec2(-0.203, 0.621),
-  vec2(0.962, -0.195), vec2(0.473, -0.480), vec2(0.519, 0.767), vec2(0.185, -0.893),
+const vec2 POISSON[12] = vec2[12](   // 앞 4개만 써도 고르게 퍼지도록 순서를 섞어 둠 (12개 합은 그대로)
+  vec2(-0.326, -0.406), vec2(0.519, 0.767), vec2(0.962, -0.195), vec2(-0.696, 0.457),
+  vec2(-0.840, -0.074), vec2(-0.203, 0.621), vec2(0.473, -0.480), vec2(0.185, -0.893),
   vec2(0.507, 0.064), vec2(0.896, 0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598));
+int gTaps = 12;   // 그림자 표본 수 (풀처럼 잘고 많은 조각은 4로 줄여 가볍게)
 float pcf(sampler2DShadow sm, vec3 p, float radius, float bias) {
   vec2 t = radius / vec2(textureSize(sm, 0));
   float s = 0.0;
-  for (int i = 0; i < 12; i++) s += texture(sm, vec3(p.xy + POISSON[i] * t, p.z - bias));
-  return s / 12.0;
+  for (int i = 0; i < 12; i++) {
+    if (i >= gTaps) break;
+    s += texture(sm, vec3(p.xy + POISSON[i] * t, p.z - bias));
+  }
+  return s / float(gTaps);
 }
 float shadowAt(vec3 w) {
   vec4 cf = uLightVP * vec4(w, 1.0);
@@ -339,6 +358,7 @@ void main() {
   if (uGrass > 0.5) base = mix(base, base * 1.15 + vec3(0.03, 0.035, 0.025), vGust * smoothstep(0.0, 0.08, vWind));   // 바람 물결이 지나가면 풀끝이 은빛으로 옅게 반짝 (야숨 풀밭처럼)
 
   float cloud = cloudShadow(vWorld);
+  if (uGrass > 0.5) gTaps = 4;   // 풀잎은 화면을 여러 겹 덮으므로 그림자 표본을 줄임 (풀은 흔들려서 차이가 안 보임)
   float sh = (uShadowOn > 0.5 ? shadowAt(vWorld) : uShadowOutside) * cloud;
   float under = uGroundDetail > 0.5 ? clamp(uWaterLevel - vWorld.y, 0.0, 3.0) : 0.0;   // 물속 깊이
   if (under > 0.0) base = mix(base, base * vec3(0.5, 0.78, 0.8), smoothstep(0.0, 0.5, under));
@@ -435,6 +455,7 @@ void main() {
   vUV = aUV;
   vMat = -aColor.a;
   gl_Position = uLightVP * worldPos();
+  if (aCorner.z > 0.0) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);   // 카메라를 향한 잎 판은 그림자를 만들지 않음 (잎 덩어리 공이 대신 드리움, 판 위 얼룩 그림자 방지)
 }`,
 
   shadowFS: `#version 300 es

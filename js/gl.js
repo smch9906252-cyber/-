@@ -48,6 +48,7 @@ const GL = {
       return buf;
     };
     const geo = [[0, upload(b.pos), 3], [1, upload(b.nrm), 3], [2, upload(b.col), 4], [3, upload(b.wind), 1], [6, upload(b.uv), 2]];
+    if (b.ofs && b.ofs.length) geo.push([7, upload(b.ofs), 3]);   // 카메라를 향한 잎 판 모서리 (없으면 0)
     const instBuf = instances ? upload(instances) : null;
     // 정점 데이터 연결 묶음(VAO). 구역마다 인스턴스 시작 위치만 다르게
     const makeVao = (firstInstance) => {
@@ -76,7 +77,7 @@ const GL = {
     return { buffers, count, instanced: true, parts };
   },
 
-  // test(box)가 false인 구역은 건너뜀 (화면 밖이거나 너무 멂)
+  // test(box)가 false인 구역은 건너뜀 (화면 밖이거나 너무 멂). 0~1 숫자면 모델 정점 앞부분만 그 비율만큼 그림 (먼 풀은 풀잎 절반)
   // tint: 인스턴스 없이 그릴 때 [크기, 색r, 색g, 색b] (예: 슬라임 색 바꾸기)
   drawMesh(m, test, tint) {
     const gl = this.gl;
@@ -89,9 +90,10 @@ const GL = {
       return;
     }
     for (const part of m.parts) {
-      if (test && part.box && !test(part.box)) continue;
+      const k = test && part.box ? test(part.box) : true;
+      if (!k) continue;
       gl.bindVertexArray(part.vao);
-      gl.drawArraysInstanced(gl.TRIANGLES, 0, m.count, part.count);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, k === true ? m.count : Math.max(3, Math.round((m.count * k) / 3) * 3), part.count);
     }
   },
 

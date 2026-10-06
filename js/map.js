@@ -29,10 +29,11 @@ const BLUE_FLOWERS = [[0.08, 0.18, 1.2], [0.25, 0.2, 1.2]];
 // 모델별 그리기 설정
 //   thin: 얇은 잎(양면, 그림자 없음)  grass: 바람 물결·전사 주변에서 눕기  ao: 밑동을 어둡게 할 높이(m)  rim: 윤곽 빛
 //   dist: 이보다 먼 구역은 그리지 않음(m, 작은 것들은 멀면 어차피 안 보임)
+//   lod: 풀 거리·생략 거리를 config.js의 grassDist·grassLod로 (먼 구역은 풀잎 절반만)
 const PROP_STYLE = {
   pineA: { ao: 2.5, rim: 0.4 }, pineB: { ao: 2.5, rim: 0.4 }, oakA: { ao: 2.5, rim: 0.4 }, oakB: { ao: 2.5, rim: 0.4 },
   birch: { ao: 2.5, rim: 0.4 }, bush: { ao: 1, rim: 0.3 }, rock: { ao: 1.2, rim: 0.3 }, log: { rim: 0.2, dist: 60 },
-  mushroom: { rim: 0.3, dist: 35 }, grass: { thin: true, grass: true, dist: 50 }, grassGold: { thin: true, grass: true, dist: 50 }, flower: { thin: true, grass: true, dist: 40 },
+  mushroom: { rim: 0.3, dist: 35 }, grass: { thin: true, grass: true, dist: 50, lod: true }, grassGold: { thin: true, grass: true, dist: 50, lod: true }, flower: { thin: true, grass: true, dist: 40 },
   fern: { thin: true, grass: true, dist: 50 }, reeds: { thin: true, grass: true, dist: 60 }, lily: { thin: true, dist: 60 },
   pebbles: { rim: 0.2, dist: 30 }, litter: { thin: true, dist: 40 }, ruin: { ao: 2, rim: 0.3 }, gate: { rim: 0.3 },
   cliffRock: { ao: 4, rim: 0.15 }, stalagmite: { ao: 1.5, rim: 0.2 }, stalactite: { rim: 0.1 }, crystal: { rim: 0.3 },
@@ -44,9 +45,10 @@ const CHUNK = 12;   // 화면 밖 건너뛰기를 위한 구역 크기 (m)
 function extentOf(b) {
   let r = 0, y0 = Infinity, y1 = -Infinity;
   for (let i = 0; i < b.pos.length; i += 3) {
-    r = Math.max(r, Math.hypot(b.pos[i], b.pos[i + 2]));
-    y0 = Math.min(y0, b.pos[i + 1]);
-    y1 = Math.max(y1, b.pos[i + 1]);
+    const k = b.ofs ? b.ofs[i + 2] * 0.71 : 0;   // 카메라를 향한 잎 판은 가운데에서 이만큼 펼쳐짐
+    r = Math.max(r, Math.hypot(b.pos[i], b.pos[i + 2]) + k);
+    y0 = Math.min(y0, b.pos[i + 1] - k);
+    y1 = Math.max(y1, b.pos[i + 1] + k);
   }
   return { r, y0, y1 };
 }
@@ -214,6 +216,12 @@ const World = {
     const n = Utils.fbm2(x * 0.06 + 40, z * 0.06 - 25, 3);
     const open = 1 - this.blend(x, z, (c) => c === '#');
     return Utils.clamp((n - 0.46) * 5, 0, 1) * open * open * (1 - this.dirtAmount(x, z));
+  },
+
+  // 풀 포기 색: 그 자리 땅 색을 따라감 (마른 풀밭은 노르스름, 숲 가장자리는 짙게) → 풀과 땅이 한 덩어리로 보임
+  grassTint(x, z, jitter) {
+    const g = this.groundColor(x, z), G = this.pal.grass;
+    return [0, 1, 2].map((i) => Utils.clamp(Utils.lerp(1, g[i] / G[i], 0.75), 0.6, 1.5) * jitter[i]);
   },
 
   // 동굴 천장 높이 (m). 넓은 곳 가운데는 높고 벽 쪽으로 낮아짐. 동굴이 아니면 무한히 높음
@@ -461,7 +469,7 @@ const World = {
             // 금빛 풀밭 위는 금빛 마른 풀 (경계에선 섞여 들쭉날쭉), 그 밖에도 드문드문 한 포기씩
             const g = this.goldAmount(x, z);
             const dry = deco() < g * 1.3 - 0.15 || deco() < 0.03;
-            put(dry ? 'grassGold' : 'grass', x, z, 0.7 + rnd() * 0.7, shade(0.35), 0.02);
+            put(dry ? 'grassGold' : 'grass', x, z, 0.8 + rnd() * 0.45, this.grassTint(x, z, shade(0.2)), 0.02);   // 풀 색은 그 자리 땅 색을 따라감
           }
         }
       }
@@ -483,8 +491,9 @@ const World = {
       if (!inst[name].length) continue;
       const st = PROP_STYLE[name];
       const { sorted, parts } = groupByChunk(inst[name], extentOf(Models[name]));
+      const g = CONFIG.graphics;   // 풀은 품질 설정을 따름 (휴대폰은 가까이만, 먼 구역은 풀잎 절반)
       this.meshes.push({ mesh: GL.createMesh(Models[name], sorted, parts), cull: !st.thin, shadow: !st.thin,
-        ao: st.ao || 0, grass: !!st.grass, rim: st.rim || 0, dist: st.dist || 0 });
+        ao: st.ao || 0, grass: !!st.grass, rim: st.rim || 0, dist: (st.lod && g.grassDist) || st.dist || 0, lod: st.lod ? g.grassLod || 0 : 0 });
     }
 
     if (cave) this.shafts = this.holes.length ? GL.createMesh(this.buildShafts()) : null;

@@ -10,7 +10,9 @@ const CONFIG = {
     autoQuality: true,   // 끊기면 해상도를 자동으로 조금 낮춤
     shadows: true,       // 그림자 켜기(true) / 끄기(false)
     shadowSize: 2048,    // 그림자 선명도 (1024 / 2048 / 4096)
-    grassDensity: 11,    // 1㎡당 풀 포기 수
+    grassDensity: 10,    // 1㎡당 풀 포기 수 (한 포기 = 풀잎 14장)
+    grassDist: 50,       // 풀을 그리는 거리 (m). 끝에서는 풀이 땅으로 스르르 줄어듦
+    grassLod: 20,        // 이보다 먼 풀은 큰 풀잎 절반만 그림 (0이면 끔)
     fov: 75,             // 시야각
     fogDensity: 0.013,   // 안개 짙기 (클수록 가까운 곳부터 흐려짐)
     outline: 0.012,      // 3인칭 전사 외곽선 두께(m, 0이면 끔)
@@ -28,7 +30,9 @@ const CONFIG = {
   mobileGraphics: {
     renderScale: 0.8,
     shadowSize: 1024,
-    grassDensity: 6,
+    grassDensity: 4,
+    grassDist: 32,
+    grassLod: 12,
     ssao: false,
     reflections: false,
     maxPixels: 1.1e6,

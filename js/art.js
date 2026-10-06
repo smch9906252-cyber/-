@@ -64,6 +64,7 @@ function vary(c, amount, rnd) {
 }
 
 const NO_UV = [0, 0];
+const NO_OFS = [0, 0, 0];
 
 // 삼각형을 모아 모델을 만드는 도구
 class MeshBuilder {
@@ -73,14 +74,16 @@ class MeshBuilder {
     this.col = [];   // 색 (r, g, b, 재질)
     this.wind = [];  // 바람에 흔들리는 정도 (m)
     this.uv = [];    // 무늬 그림 좌표 (잎 판만 사용)
+    this.ofs = [];   // 카메라 쪽으로 세우는 잎 판의 모서리 (x, y, 크기). 보통 정점은 0
   }
 
-  vert(p, n, color, wind = 0, uv = NO_UV) {
+  vert(p, n, color, wind = 0, uv = NO_UV, ofs = NO_OFS) {
     this.pos.push(p[0], p[1], p[2]);
     this.nrm.push(n[0], n[1], n[2]);
     this.col.push(color[0], color[1], color[2], color[3] || 0);
     this.wind.push(wind);
     this.uv.push(uv[0], uv[1]);
+    this.ofs.push(ofs[0], ofs[1], ofs[2]);
   }
 
   // 각진 삼각형 (면 하나에 법선 하나). center를 주면 면이 center 바깥쪽을 향하게 맞춤
@@ -359,6 +362,60 @@ function leafCards(b, rnd, c, rx, ry, count, colors, size, nc, needle) {
   }
 }
 
+// 카메라 쪽으로 세우는 잎 판: 정점 6개를 모두 가운데 p에 두고 모서리는 셰이더가 화면 방향으로 펼침
+// → 어느 쪽에서 봐도 가는 선이 되지 않고 둥근 잎 뭉치로 보임 (앞면만 있으면 되어 정점도 절반)
+function leafBillboard(b, rnd, p, size, color, nc, needle) {
+  const k = size * (0.75 + rnd() * 0.5), a = rnd() * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+  const n = V3.normalize(V3.sub(p, nc));
+  const col = [color[0], color[1], color[2], MAT.CARD];
+  const u0 = needle ? 0.5 : 0;
+  const cs = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
+  const uv = [[u0, 1], [u0 + 0.5, 1], [u0 + 0.5, 0], [u0, 0]];
+  for (const i of [0, 1, 2, 0, 2, 3]) {
+    const x = cs[i][0] * ca - cs[i][1] * sa, y = cs[i][0] * sa + cs[i][1] * ca;   // 판마다 돌려 같은 무늬가 반복돼 보이지 않게
+    b.vert(p, V3.normalize(V3.add(n, [0, y * 0.5, 0])), col, 0, uv[i], [x, y, k]);   // 위쪽 모서리는 하늘빛을 더 받게
+  }
+}
+
+// 둥근 뭉게 잎 덩어리: 큰 타원(중심 C, 반지름 R) 겉에 작은 공 n개를 붙임 (반지름 rMin~rMax)
+//   법선은 큰 타원 쪽으로 모아 한 덩어리처럼 부드럽게 빛을 받고, 공 사이 틈은 정점 색을 어둡게 해 붓으로 찍은 듯한 잎 뭉치가 드러남
+//   다른 공 속에 묻혀 안 보이는 면은 만들지 않음 (삼각형 절약). cards: 공마다 꽂아 볼 잎 판 수
+function puffCanopy(b, rnd, C, R, n, rMin, rMax, colors, cards, cardSize) {
+  const puffs = [{ c: C, r: Math.min(R[0], R[1], R[2]) * 0.8 }];   // 속을 채우는 공 (거의 다 묻히고 밑면만 남음)
+  for (let i = 0; i < n; i++) {   // 위쪽에 몰리게, 황금각으로 돌려 고르게 퍼뜨림
+    const y = 1 - ((i + 0.5) / n) * 1.6, s = Math.sqrt(1 - y * y), th = i * 2.4 + rnd() * 0.6, d = 0.62 + rnd() * 0.14;
+    puffs.push({ c: [C[0] + Math.cos(th) * s * R[0] * d, C[1] + y * R[1] * d, C[2] + Math.sin(th) * s * R[2] * d], r: rMin + rnd() * (rMax - rMin) });
+  }
+  const rel = (p) => [(p[0] - C[0]) / R[0], (p[1] - C[1]) / R[1], (p[2] - C[2]) / R[2]];   // 큰 타원 기준 위치 (겉면 = 길이 1)
+  const buried = (q, skip) => puffs.some((o, j) => j !== skip && Math.hypot(q[0] - o.c[0], q[1] - o.c[1], q[2] - o.c[2]) < o.r * 0.9);
+  const ico = icoGeometry(1);
+  puffs.forEach((o, i) => {
+    const green = vary(colors[(rnd() * colors.length) | 0], 0.12, rnd);
+    const pts = ico.verts.map((v) => V3.add(o.c, V3.scale(v, o.r * (1 + (rnd() - 0.5) * 0.22))));
+    const nrm = pts.map((p) => {
+      const e = rel(p);
+      const big = V3.normalize([e[0] / R[0], e[1] / R[1], e[2] / R[2]]);   // 큰 타원의 법선
+      return V3.normalize(V3.add(V3.scale(big, 0.78), V3.scale(V3.normalize(V3.sub(p, o.c)), 0.22)));
+    });
+    const col = pts.map((p) => {
+      const e = rel(p), depth = Math.hypot(e[0], e[1], e[2]);
+      const k = (0.6 + 0.4 * Utils.smooth((depth - 0.55) / 0.45)) * (0.88 + 0.22 * Utils.smooth(e[1] * 0.5 + 0.5));   // 안쪽 틈·아래는 어둡게, 위는 밝게
+      return [green[0] * k, green[1] * k, green[2] * k, green[3]];
+    });
+    for (const [a, bb, c] of ico.faces) {
+      if (buried(V3.scale(V3.add(V3.add(pts[a], pts[bb]), pts[c]), 1 / 3), i)) continue;
+      b.triN(pts[a], pts[bb], pts[c], nrm[a], nrm[bb], nrm[c], green, o.c, [col[a], col[bb], col[c]]);
+    }
+    for (let k = 0; i > 0 && k < cards; k++) {   // 잎 판: 공 겉면 바깥쪽에만 (다른 공 속·덩어리 안쪽은 건너뜀)
+      const z = rnd() * 2 - 1, th = rnd() * Math.PI * 2, s = Math.sqrt(1 - z * z);
+      const p = V3.add(o.c, V3.scale([s * Math.cos(th), z, s * Math.sin(th)], o.r * (0.92 + rnd() * 0.26)));
+      const e = rel(p);
+      if (buried(p, i) || Math.hypot(e[0], e[1], e[2]) < 0.8) continue;
+      leafBillboard(b, rnd, p, cardSize, vary(colors[(rnd() * colors.length) | 0], 0.2, rnd), C, false);
+    }
+  });
+}
+
 // ---------- 나무 ----------
 
 // 소나무 한 층: 가장자리가 아래로 축 처진 원뿔 + 오목한 아랫면 (갓 모양이 아니라 가지가 늘어진 모양)
@@ -398,7 +455,7 @@ function buildPine(rnd, tall) {
     for (let k = 0; k < 24; k++) {
       const q = rim[k % rim.length].p, t = k % 2 === 0 ? 0.2 + rnd() * 0.5 : 0;
       const p = [q[0] * (1 - t), q[1] + h * t * 1.1 + 0.05, q[2] * (1 - t)];
-      leafCard(b, rnd, p, 1.0 + (1 - t) * 0.35, vary(green, 0.15, rnd), nc, true);
+      leafBillboard(b, rnd, p, 1.0 + (1 - t) * 0.35, vary(green, 0.15, rnd), nc, true);   // 처진 가지 끝이 어느 쪽에서 봐도 보송보송하게
     }
     y += h * 0.5;
     r *= 0.74;
@@ -418,15 +475,7 @@ function buildOak(rnd) {
     Shapes.cylinder(b, M4.chain(M4.translation(0, 2.3 + rnd() * 0.6, 0), M4.rotationY(a), M4.rotationZ(-0.85)),
       0.13, 0.05, 1.6, 6, bark, { rnd, top: false, smooth: true });
   }
-  const nc = [0, 4.3, 0];   // 잎 전체의 중심
-  const blobs = [[0, 4.7, 0, 2.0], [1.3, 4.0, 0.4, 1.45], [-1.2, 4.1, -0.5, 1.55], [0.2, 4.2, 1.3, 1.35], [-0.3, 4.3, -1.3, 1.3], [0.1, 5.7, 0.1, 1.3]];
-  for (const [x, y, z, r] of blobs) {
-    const green = COLORS.leaf[(rnd() * 4) | 0];
-    const cx = x + (rnd() - 0.5) * 0.4, cz = z + (rnd() - 0.5) * 0.4;
-    Shapes.icosphere(b, M4.chain(M4.translation(cx, y, cz), M4.scaling(r * 0.88, r * 0.75, r * 0.88)), 1,
-      () => vary(green, 0.1, rnd), { rnd, jitter: 0.16, smooth: true, normalCenter: nc });
-    leafCards(b, rnd, [cx, y, cz], r, r * 0.85, 17, COLORS.leaf, 1.15, nc, false);
-  }
+  puffCanopy(b, rnd, [0, 4.6, 0], [2.35, 1.6, 2.35], 13, 0.85, 1.2, COLORS.leaf, 12, 1.35);   // 뭉게뭉게 둥근 잎 덩어리 (공 13개)
   b.setWind((x, y) => Math.max(0, y - 2.5) * 0.018);
   return b;
 }
@@ -440,14 +489,7 @@ function buildBirch(rnd) {
     Shapes.cylinder(b, M4.translation((rnd() - 0.5) * 0.04, (i / segs) * H, 0), r0, r1, H / segs, 7,
       () => (rnd() < 0.22 ? vary(COLORS.birchDark, 0.3, rnd) : vary(COLORS.birch, 0.1, rnd)), { rnd, top: false, smooth: true });
   }
-  const nc = [0, 4.5, 0];
-  const blobs = [[0, 4.8, 0, 1.3], [0.7, 4.2, 0.3, 1.0], [-0.6, 4.4, -0.4, 1.05], [0.1, 5.5, -0.1, 0.95], [-0.2, 3.9, 0.7, 0.9]];
-  for (const [x, y, z, r] of blobs) {
-    const green = COLORS.birchLeaf[(rnd() * 3) | 0];
-    Shapes.icosphere(b, M4.chain(M4.translation(x, y, z), M4.scaling(r * 0.85, r * 0.8, r * 0.85)), 1,
-      () => vary(green, 0.1, rnd), { rnd, jitter: 0.2, smooth: true, normalCenter: nc });
-    leafCards(b, rnd, [x, y, z], r, r * 0.9, 14, COLORS.birchLeaf, 0.9, nc, false);
-  }
+  puffCanopy(b, rnd, [0, 4.7, 0], [1.5, 1.35, 1.5], 9, 0.55, 0.8, COLORS.birchLeaf, 10, 1.0);   // 가볍고 작은 잎 덩어리
   b.setWind((x, y) => Math.max(0, y - 2.5) * 0.022);
   return b;
 }
@@ -455,16 +497,10 @@ function buildBirch(rnd) {
 // 덤불: 잎 덩어리 + 잎 판 + 빨간 열매
 function buildBush(rnd) {
   const b = new MeshBuilder();
-  const nc = [0, 0.1, 0];
-  const blobs = [[0, 0.45, 0, 0.6], [0.45, 0.35, 0.15, 0.45], [-0.4, 0.35, -0.1, 0.48], [0.05, 0.35, 0.45, 0.42], [-0.1, 0.4, -0.45, 0.42]];
-  for (const [x, y, z, r] of blobs) {
-    Shapes.icosphere(b, M4.chain(M4.translation(x, y, z), M4.scaling(r, r * 0.85, r)), 1,
-      () => vary(COLORS.bushLeaf[(rnd() * 3) | 0], 0.12, rnd), { rnd, jitter: 0.3, smooth: true, normalCenter: nc });
-    leafCards(b, rnd, [x, y, z], r, r * 0.85, 5, COLORS.bushLeaf, 0.55, nc, false);
-  }
+  puffCanopy(b, rnd, [0, 0.42, 0], [0.78, 0.48, 0.78], 7, 0.32, 0.46, COLORS.bushLeaf, 6, 0.6);   // 낮고 둥근 잎 뭉치
   for (let i = 0; i < 7; i++) {
-    const a = rnd() * 6.28, h = 0.3 + rnd() * 0.4;
-    Shapes.icosphere(b, M4.chain(M4.translation(Math.cos(a) * 0.62, h, Math.sin(a) * 0.62), M4.scaling(0.06, 0.06, 0.06)),
+    const a = rnd() * 6.28, h = 0.3 + rnd() * 0.35;
+    Shapes.icosphere(b, M4.chain(M4.translation(Math.cos(a) * 0.82, h, Math.sin(a) * 0.82), M4.scaling(0.06, 0.06, 0.06)),
       0, () => COLORS.berry, { smooth: true });
   }
   b.setWind((x, y) => y * 0.03);
@@ -482,9 +518,9 @@ function buildRock(rnd) {
 // ---------- 풀·꽃·물가 식물 ----------
 
 // 풀잎 하나 (뿌리는 어둡고 끝은 밝게, 끝으로 갈수록 바람에 흔들림)
-function grassBlade(b, rnd, bx, bz, h, w, baseC, tipC, windScale) {
+// lean: 기우는 방향, bend: 끝이 휘어 나가는 거리(m), rank: 1이면 먼 곳에서 생략되는 작은 잎 (무늬 좌표 x에 담아 셰이더가 읽음)
+function grassBlade(b, rnd, bx, bz, h, w, baseC, tipC, windScale, lean = rnd() * Math.PI * 2, bend = 0.06 + rnd() * 0.16, rank = 0) {
   const up = [0, 1, 0];   // 풀은 모두 위를 향한 것처럼 빛을 받게 (부드러워 보임)
-  const lean = rnd() * Math.PI * 2, bend = 0.06 + rnd() * 0.16;
   const lx = Math.cos(lean), lz = Math.sin(lean);
   const sx = -lz * w, sz = lx * w;
   const midC = Utils.mixColor(baseC, tipC, 0.5);
@@ -492,20 +528,30 @@ function grassBlade(b, rnd, bx, bz, h, w, baseC, tipC, windScale) {
   const p0 = [bx - sx, 0, bz - sz], p1 = [bx + sx, 0, bz + sz];
   const m0 = [bx - sx * 0.7 + lx * mb, mh, bz - sz * 0.7 + lz * mb];
   const m1 = [bx + sx * 0.7 + lx * mb, mh, bz + sz * 0.7 + lz * mb];
-  const tip = [bx + lx * bend, h, bz + lz * bend];
+  const tip = [bx + lx * bend, h - bend * bend * 0.5, bz + lz * bend];   // 많이 휜 잎은 끝이 살짝 처짐
   const wm = mh * 0.12 * windScale, wt = h * 0.22 * windScale;
-  b.vert(p0, up, baseC, 0); b.vert(p1, up, baseC, 0); b.vert(m1, up, midC, wm);
-  b.vert(p0, up, baseC, 0); b.vert(m1, up, midC, wm); b.vert(m0, up, midC, wm);
-  b.vert(m0, up, midC, wm); b.vert(m1, up, midC, wm); b.vert(tip, up, tipC, wt);
+  const u0 = [rank, 0], um = [rank, 0.55], ut = [rank, 1];   // 무늬 좌표 = (생략 순서, 높이 비율)
+  b.vert(p0, up, baseC, 0, u0); b.vert(p1, up, baseC, 0, u0); b.vert(m1, up, midC, wm, um);
+  b.vert(p0, up, baseC, 0, u0); b.vert(m1, up, midC, wm, um); b.vert(m0, up, midC, wm, um);
+  b.vert(m0, up, midC, wm, um); b.vert(m1, up, midC, wm, um); b.vert(tip, up, tipC, wt, ut);
 }
 
-// baseC·tipC: 뿌리·끝 색, tall: 키 배율 (마른 금빛 풀은 더 길고 가늘게)
+// 풀 한 포기: 가운데서 바깥으로 분수처럼 퍼지는 풀잎 14장 (무릎 높이). baseC·tipC: 뿌리·끝 색, tall: 키 배율 (마른 금빛 풀은 더 길고 가늘게)
+// 앞 7장은 키 크고 넓은 잎 → 먼 구역은 정점 앞 절반만 그려도 풀밭이 비어 보이지 않음 (render.js)
+const GRASS_BLADES = 14;
 function buildGrassTuft(rnd, baseC = COLORS.grassBase, tipC = COLORS.grassTip, tall = 1) {
   const b = new MeshBuilder();
-  for (let i = 0; i < 8; i++) {
-    const a = rnd() * Math.PI * 2, r = rnd() * 0.13;
-    grassBlade(b, rnd, Math.cos(a) * r, Math.sin(a) * r, (0.25 + rnd() * 0.38) * tall, (0.03 + rnd() * 0.02) / Math.sqrt(tall),
-      vary(baseC, 0.2, rnd), vary(tipC, 0.25, rnd), 1);
+  for (let i = 0; i < GRASS_BLADES; i++) {
+    const keep = i < GRASS_BLADES / 2;
+    const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * 0.2;
+    const h = (keep ? 0.42 + rnd() * 0.28 : 0.24 + rnd() * 0.24) * tall;
+    const w = (keep ? 0.032 + rnd() * 0.014 : 0.022 + rnd() * 0.01) / Math.sqrt(tall);
+    const lean = a + (rnd() - 0.5) * 1.3;                                  // 바깥쪽으로 기움
+    const bend = (0.08 + rnd() * 0.16) * (0.7 + r * 2.5) * (h / 0.5);      // 바깥 잎·키 큰 잎일수록 더 휨
+    const sun = rnd() < 0.3 ? 0.35 + rnd() * 0.45 : 0;                     // 몇 장은 잎끝이 볕에 바래 더 밝고 노르스름하게
+    const t0 = vary(tipC, 0.2, rnd);
+    const tip = [t0[0] * (1 + 0.4 * sun), t0[1] * (1 + 0.22 * sun), t0[2] * (1 - 0.15 * sun), t0[3]];
+    grassBlade(b, rnd, Math.cos(a) * r, Math.sin(a) * r, h, w, vary(baseC, 0.15, rnd), tip, 1, lean, bend, keep ? 0 : 1);
   }
   return b;
 }
