@@ -23,7 +23,7 @@ const LIGHTING = {
     shadeDesat: 0.4,                            // 그늘의 색을 빼는 정도 (짙은 초록 대신 차분한 회녹색 그늘)
     leafGlow: 0.12,                             // 그늘진 잎으로 비쳐 드는 햇빛 (나무 그늘이 칙칙하지 않게)
     moss: [0.1, 0.15, 0.05],                    // 바위 윗면 이끼 색 (옅은 올리브)
-    saturation: 1.08,                           // 화면 채도 (기본 1.22)
+    saturation: 1.14,                           // 화면 채도 (기본 1.22. 밝기 곡선·공기로 뽀얘지는 만큼 조금 올리고, 어두운 곳은 darkDesat이 다시 뺌)
     contrast: 0.97,                             // 화면 대비 (기본 1.05, 낮을수록 공기처럼 부드러움)
     split: 0.7,                                 // 그늘은 푸르게·밝은 곳은 따뜻하게 나누는 정도 (기본 1)
     lift: [0.015, 0.02, 0.03],                  // 어두운 곳을 하늘빛으로 살짝 띄움 (흐린 물감 느낌)
@@ -32,6 +32,19 @@ const LIGHTING = {
     fogScale: 0.85,                             // 가까운 안개는 조금 옅게 (먼 곳은 공기 원근감이 맡음)
     farFog: 0.7,                                // 먼 산·언덕 모델의 하늘색 안개 배율 (대신 푸른 공기 색에 잠김)
     mountainScale: 0.55,                        // 먼 산맥 높이 배율 (지평선 위로 낮게 깔리게)
+    // 화면 마무리 (야숨풍: 밝고 뽀얀 공기, 크림색 밝은 곳, 올리브빛 차분한 그늘, 먼 곳은 물감처럼 부드럽게)
+    curve: [0.16, 0.08, 0.04],                  // 밝기 곡선: 어두운 곳 띄우기 · 밝은 곳 눌러 주기(가장 밝아도 0.92) · 노출 +4%
+    shadeTint: [1.03, 1.0, 0.97],               // 그늘 쪽 색 (야숨 그늘은 푸르지 않고 따뜻한 올리브빛)
+    highTint: [1.03, 1.01, 0.84],               // 밝은 쪽 색 (하얗게 타는 대신 따뜻한 크림색)
+    skyKeep: 0.75,                              // 하늘은 색 나누기를 덜 받아 맑은 물빛 그대로
+    darkDesat: 0.15,                            // 어두운 곳 색 빼기 (탁한 진초록 대신 차분한 회녹색)
+    bloomKnee: [0.55, 0.95],                    // 빛 번짐이 시작·가득 차는 밝기 (낮춰서 하늘·구름·볕 받은 풀이 은은하게 번짐)
+    bloomScale: 1.3,                            // 빛 번짐 세기 배율
+    bloomScreen: 1,                             // 빛 번짐·빛줄기를 스크린으로 섞음 (하얗게 타지 않고 뽀얗게)
+    bloomTint: [1.0, 0.97, 0.9],                // 빛 번짐 색 (따뜻한 햇빛)
+    veil: [0.66, 0.74, 0.8],                    // 몇 걸음 앞부터 덮이는 뽀얀 공기 색 (화면 밝기 기준, 옅은 푸른 회색)
+    veilK: [5, 0.022, 0.35],                    // 공기: 시작 거리(m) · 짙어지는 빠르기 · 최대 짙기 (전사는 또렷, 뒤 숲은 뽀얗게)
+    dof: [30, 130, 0.5],                        // 먼 곳 흐림: 시작 거리(m) · 가장 흐린 거리(m) · 최대 섞는 정도 (CONFIG.graphics.softFocus)
     // 캐릭터 그림체 (야숨풍). 없는 값은 예전 그대로 (useWorld의 기본값)
     // soft 명암 경계 너비, shade 그늘 밝기, lit 밝은 면 밝기, sky 그늘이 하늘·땅빛을 받는 정도,
     // rim 윤곽 빛, grad 밝은 면의 둥근 그러데이션, metal 금속 대비, sheer 망토에 비치는 햇빛
@@ -348,7 +361,10 @@ const Renderer = {
     const pal = Skills.ult ? Skills.ult.pal : Weapons.cur;   // 번쩍임 색은 궁극기를 쓴 무기의 속성 색 (어둡게 물드는 것은 세상·하늘을 그릴 때 이미 처리)
     Post.end({ sunUV: [(cx / cw) * 0.5 + 0.5, (cy / cw) * 0.5 + 0.5], rayStrength: rayStrength * (1 - Skills.darken), rayColor: V3.scale(L.sunColor, 0.18), proj, near, far,
       flash: Skills.flash, flashColor: pal.flash, grade: L.grade,
-      sat: L.saturation, contrast: L.contrast, split: L.split, lift: L.lift, ao: L.aoStrength });
+      sat: L.saturation, contrast: L.contrast, split: L.split, lift: L.lift, ao: L.aoStrength,
+      curve: L.curve, shadeTint: L.shadeTint, highTint: L.highTint, skyKeep: L.skyKeep, darkDesat: L.darkDesat,
+      knee: L.bloomKnee, bloomScale: L.bloomScale, bloomScreen: L.bloomScreen, bloomTint: L.bloomTint, dof: L.dof,
+      veil: L.veil, veilK: L.veilK && [L.veilK[0], L.veilK[1], L.veilK[2] * (1 - Skills.darken)] });   // 궁극기로 어두워질 땐 공기도 걷힘
   },
 
   // 해 쪽에서 내려다보는 카메라: 전사 앞쪽 ahead(m) 지점을 중심으로 가로세로 2R(m), 깊이 ±depth(m)

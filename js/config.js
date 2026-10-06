@@ -21,6 +21,7 @@ const CONFIG = {
     ssao: true,          // 구석·풀뿌리·덤불 밑을 은은하게 어둡게 (느리면 false)
     lensFlare: true,     // 해를 볼 때 렌즈 빛 번짐
     reflections: true,   // 연못에 주변이 비침 (느리면 false)
+    softFocus: true,     // 먼 숲·산을 물감처럼 부드럽게 흐림 (느리면 false)
     life: true,          // 나비·새·떨어지는 잎·발걸음 먼지
     maxPixels: 2.6e6,    // 화면 해상도 상한 (화소 수)
     maxLights: 12,       // 동굴에서 한 번에 비추는 횃불·수정 빛 수 (1 ~ 12, 적을수록 빠름)
@@ -35,6 +36,7 @@ const CONFIG = {
     grassLod: 12,
     ssao: false,
     reflections: false,
+    softFocus: false,
     maxPixels: 1.1e6,
     maxLights: 6,
   },

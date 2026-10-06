@@ -823,6 +823,7 @@ precision mediump float;
 in vec2 vUv;
 uniform sampler2D uTex;
 uniform vec2 uTexel;
+uniform vec2 uKnee;       // 빛 번짐이 시작·가득 차는 밝기 (0이면 기본 0.7 ~ 1.0, 숲은 낮춰 하늘·볕 받은 풀이 은은하게 번짐)
 out vec4 outColor;
 void main() {
   vec3 c = vec3(0.0);
@@ -830,7 +831,8 @@ void main() {
     for (int y = -1; y <= 1; y++) c += texture(uTex, vUv + vec2(x, y) * uTexel).rgb;
   c /= 9.0;
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  outColor = vec4(c * smoothstep(0.7, 1.0, l), 1.0);
+  vec2 kn = uKnee.y > 0.0 ? uKnee : vec2(0.7, 1.0);
+  outColor = vec4(c * smoothstep(kn.x, kn.y, l), 1.0);
 }`,
 
   // 한 방향으로 흐리게 (가로 한 번, 세로 한 번)
@@ -842,12 +844,12 @@ uniform vec2 uDir;
 out vec4 outColor;
 const float W[5] = float[5](0.227, 0.1945, 0.1216, 0.054, 0.0162);
 void main() {
-  vec3 c = texture(uTex, vUv).rgb * W[0];
+  vec4 c = texture(uTex, vUv) * W[0];   // 알파도 함께 흐림 (먼 곳 흐림은 알파에 무게를 담음)
   for (int i = 1; i < 5; i++) {
-    c += texture(uTex, vUv + uDir * float(i)).rgb * W[i];
-    c += texture(uTex, vUv - uDir * float(i)).rgb * W[i];
+    c += texture(uTex, vUv + uDir * float(i)) * W[i];
+    c += texture(uTex, vUv - uDir * float(i)) * W[i];
   }
-  outColor = vec4(c, 1.0);
+  outColor = c;
 }`,
 
   // 빛줄기: 각 픽셀에서 해 쪽으로 걸어가며 '밝은 하늘'이 얼마나 보이는지 모음
@@ -939,6 +941,33 @@ void main() {
     wsum += w;
   }
   outColor = vec4(vec3(sum / max(wsum, 0.0001)), 1.0);
+}`,
+
+  // 먼 곳 흐림 재료: 원래 그림 4x4 칸을 한 칸으로 줄이면서 먼 곳일수록 무게를 크게 (색 x 무게, 알파 = 무게)
+  // → 흐린 뒤 무게로 나누면 가까운 전사·나무 색이 먼 배경으로 번지지 않음
+  softFS: `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uTex;
+uniform highp sampler2D uDepth;
+uniform vec2 uTexel;      // 원래 그림 한 칸 크기
+uniform vec2 uNearFar;
+uniform vec2 uRange;      // 이 거리(m)부터 흐려지기 시작해 여기서 가장 흐림
+out vec4 outColor;
+float linZ(float d) {
+  float z = d * 2.0 - 1.0;
+  return 2.0 * uNearFar.x * uNearFar.y / (uNearFar.y + uNearFar.x - z * (uNearFar.y - uNearFar.x));
+}
+void main() {
+  vec4 sum = vec4(0.0);
+  for (int i = 0; i < 4; i++) {
+    vec2 uv = vUv + (vec2(float(i & 1), float(i >> 1)) - 0.5) * 2.0 * uTexel;   // 2x2 칸씩 섞이는 네 곳
+    vec4 s = texture(uTex, uv);
+    float w = smoothstep(uRange.x, uRange.y, linZ(texture(uDepth, uv).r));
+    w *= (s.a > 0.2 && s.a < 0.3) ? 0.0 : 1.0;   // 1인칭 손·검은 빼기
+    sum += vec4(s.rgb * w, w);
+  }
+  outColor = sum * 0.25;
 }`,
 
   // 나비·새·낙엽·먼지 (점 하나에 모양을 그려 넣음)
@@ -1043,7 +1072,25 @@ uniform float uSat;       // 채도 배율 (기본 1.22)
 uniform float uContrast;  // 대비 배율 (기본 1.05)
 uniform float uSplit;     // 그늘은 푸르게·밝은 곳은 따뜻하게 나누는 정도 (기본 1)
 uniform vec3 uLift;       // 어두운 곳을 살짝 띄우는 색 (기본 0)
+// 아래 값은 모두 0이면 예전 그대로 (노을·동굴은 값을 주지 않아 바뀌지 않음)
+uniform vec3 uCurve;      // 밝기 곡선: x 어두운 곳 띄우기, y 밝은 곳 눌러 주기 (가장 밝아도 1 - y), z 노출 더하기
+uniform vec3 uShadeTint;  // 그늘 쪽 색 (0이면 기본: 푸르게)
+uniform vec3 uHighTint;   // 밝은 쪽 색 (0이면 기본: 따뜻하게)
+uniform float uSkyKeep;   // 하늘은 색 나누기를 덜 받아 제 색을 지키는 정도 (숲: 맑은 물빛 하늘)
+uniform float uDarkDesat; // 어두운 곳 색 빼기
+uniform float uBloomScreen; // 1이면 빛 번짐·빛줄기를 스크린으로 섞음 (밝은 곳이 하얗게 타지 않고 뽀얗게)
+uniform vec3 uBloomTint;  // 빛 번짐 색 (0이면 흰색)
+uniform sampler2D uSoft;          // 먼 곳만 골라 흐리게 한 그림 (색 x 무게, 알파 = 무게)
+uniform highp sampler2D uDepth;   // 장면 깊이 (공기·먼 곳 흐림)
+uniform highp vec2 uNearFar;
+uniform vec3 uDof;        // 먼 곳 흐림: x 시작 거리(m), y 가장 흐린 거리(m), z 최대 섞는 정도
+uniform vec3 uVeil;       // 몇 걸음 앞부터 덮이는 뽀얀 공기 색 (화면 밝기 기준)
+uniform vec3 uVeilK;      // 공기: x 시작 거리(m), y 짙어지는 빠르기(1/m), z 최대 짙기
 out vec4 outColor;
+highp float linZ(highp float d) {
+  highp float z = d * 2.0 - 1.0;
+  return 2.0 * uNearFar.x * uNearFar.y / (uNearFar.y + uNearFar.x - z * (uNearFar.y - uNearFar.x));
+}
 const float GHOST_T[4] = float[4](0.7, 1.15, 1.5, 2.1);
 const float GHOST_R[4] = float[4](0.05, 0.12, 0.035, 0.09);
 const vec3 GHOST_C[4] = vec3[4](vec3(1.0, 0.6, 0.3), vec3(0.4, 1.0, 0.6), vec3(0.6, 0.5, 1.0), vec3(1.0, 0.9, 0.5));
@@ -1052,8 +1099,19 @@ void main() {
   vec3 c = sc.rgb;
   float aoMask = (sc.a > 0.2 && sc.a < 0.3) ? 0.0 : 1.0;   // 1인칭 손·검에는 주변 가림을 넣지 않음
   c *= mix(1.0, texture(uAO, vUv).r, uAOStrength * aoMask);
-  c += texture(uBloom, vUv).rgb * uBloomStrength;
-  c += texture(uRays, vUv).rgb * uRayColor;
+  float sky = step(0.9, sc.a);                                 // 하늘 (알파 1)
+  if (uDof.z > 0.0 || uVeilK.z > 0.0) {
+    highp float z = linZ(texture(uDepth, vUv).r);
+    if (uDof.z > 0.0) {   // 먼 숲·산은 물감이 번진 듯 부드럽게 (가까운 전사·나무는 또렷하게, 하늘은 덜)
+      vec4 s = texture(uSoft, vUv);
+      float k = smoothstep(uDof.x, uDof.y, z) * uDof.z * aoMask * (1.0 - 0.5 * sky) * smoothstep(0.02, 0.2, s.a);
+      c = mix(c, s.rgb / max(s.a, 0.001), k);
+    }
+    // 뽀얀 공기: 몇 걸음 앞부터 조금씩 잠김 (하늘은 이미 지평선 색, 1인칭 손은 빼기)
+    c = mix(c, uVeil, (1.0 - exp(-max(z - uVeilK.x, 0.0) * uVeilK.y)) * uVeilK.z * aoMask * (1.0 - sky));
+  }
+  vec3 glow = texture(uBloom, vUv).rgb * uBloomStrength * (uBloomTint.g > 0.0 ? uBloomTint : vec3(1.0)) + texture(uRays, vUv).rgb * uRayColor;
+  c = mix(c + glow, 1.0 - (1.0 - clamp(c, 0.0, 1.0)) * (1.0 - clamp(glow, 0.0, 1.0)), uBloomScreen);   // 스크린: 이미 밝은 곳엔 덜 더해져 하얗게 타지 않음
   if (uFlare > 0.0) {
     // 해가 가려졌는지: 해 주변 몇 곳이 하늘(알파 1)인지 확인
     float vis = 0.0;
@@ -1071,10 +1129,22 @@ void main() {
     }
     c += fl * vis * uFlare;
   }
+  c *= 1.0 + uCurve.z;                                         // 노출 (0이면 그대로)
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
   c = mix(vec3(l), c, uSat);                                   // 채도 (기본 1.22, 숲은 낮춰 부드러운 파스텔 색)
   c = (c - 0.5) * uContrast + 0.5;                             // 대비 (숲은 살짝 낮춰 공기처럼 맑게)
-  c = mix(c * mix(vec3(1.0), vec3(0.94, 1.0, 1.08), uSplit), c * mix(vec3(1.0), vec3(1.05, 1.0, 0.92), uSplit), smoothstep(0.2, 0.8, l));   // 그늘은 푸르게, 밝은 곳은 따뜻하게
+  vec3 cc = clamp(c, 0.0, 1.0);
+  c += uCurve.x * (1.0 - cc) * (1.0 - cc) * (1.0 - cc);        // 어두운 곳만 띄움 (중간 밝기는 거의 그대로 → 흐린 물감처럼 밝은 그늘)
+  if (uCurve.y > 0.0) {                                        // 밝은 곳을 부드럽게 눌러 하얗게 타지 않게
+    cc = clamp(c, 0.0, 1.0);
+    c = cc - uCurve.y * cc * cc * cc * cc;
+  }
+  vec3 shadeT = uShadeTint.g > 0.0 ? uShadeTint : vec3(0.94, 1.0, 1.08);
+  vec3 highT = uHighTint.g > 0.0 ? uHighTint : vec3(1.05, 1.0, 0.92);
+  float sp = uSplit * (1.0 - uSkyKeep * step(0.9, sc.a));     // 하늘은 제 색을 지킴
+  c = mix(c * mix(vec3(1.0), shadeT, sp), c * mix(vec3(1.0), highT, sp), smoothstep(0.2, 0.8, l));   // 그늘 색·밝은 곳 색 (기본: 그늘은 푸르게, 밝은 곳은 따뜻하게)
+  float l2 = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = mix(c, vec3(l2), uDarkDesat * (1.0 - smoothstep(0.12, 0.6, l2)));   // 어두운 곳은 색을 조금 빼서 차분하게
   c *= uGrade;
   c = c * (1.0 - uLift) + uLift;                               // 어두운 곳을 하늘빛으로 살짝 띄움 (흐린 물감 느낌)
   c += uFlashAdd;

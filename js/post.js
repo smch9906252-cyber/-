@@ -6,7 +6,7 @@ const Post = {
 
   init() {
     const gl = GL.gl;
-    for (const name of ['bright', 'blur', 'rays', 'composite', 'ssao', 'aoBlur']) {
+    for (const name of ['bright', 'blur', 'rays', 'composite', 'ssao', 'aoBlur', 'soft']) {
       this.p[name] = GL.program(SHADERS.postVS, SHADERS[name + 'FS']);
     }
     this.vao = gl.createVertexArray();
@@ -43,7 +43,7 @@ const Post = {
       gl.deleteRenderbuffer(this.msaaColor);
       gl.deleteRenderbuffer(this.msaaDepth);
     }
-    [this.scene, this.bloomA, this.bloomB, this.rays, this.ao, this.aoTmp, this.refl].forEach((t) => this.freeTarget(t));
+    [this.scene, this.bloomA, this.bloomB, this.softA, this.rays, this.ao, this.aoTmp, this.refl].forEach((t) => this.freeTarget(t));
     if (this.reflDepth) gl.deleteRenderbuffer(this.reflDepth);
     if (this.depthTex) {
       gl.deleteTexture(this.depthTex);
@@ -67,6 +67,7 @@ const Post = {
     this.scene = this.makeTarget(w, h);
     this.bloomA = this.makeTarget(qw, qh);
     this.bloomB = this.makeTarget(qw, qh);
+    this.softA = this.makeTarget(qw, qh);   // 먼 곳 흐림 (흐리는 동안 bloomB를 잠깐 빌려 씀)
     this.rays = this.makeTarget(Math.max(1, w >> 1), Math.max(1, h >> 1));
     this.ao = this.makeTarget(Math.max(1, w >> 1), Math.max(1, h >> 1));
     this.aoTmp = this.makeTarget(Math.max(1, w >> 1), Math.max(1, h >> 1));
@@ -132,6 +133,7 @@ const Post = {
   },
 
   // opts: sunUV(화면 속 해 위치), rayStrength(빛줄기 세기), rayColor, proj(원근 행렬), near, far
+  //       색 보정·빛 번짐·공기·먼 곳 흐림 값은 테마(LIGHTING)에서 옴. 없으면 예전 그대로
   end(opts) {
     const gl = GL.gl, w = this.w, h = this.h;
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.msaa);
@@ -141,13 +143,22 @@ const Post = {
     gl.disable(gl.CULL_FACE);
     gl.disable(gl.BLEND);
     gl.bindVertexArray(this.vao);
+    const nf = [opts.near, opts.far];
 
-    // 빛 번짐: 밝은 부분만 골라 작게 줄인 뒤 흐리게
-    this.pass(this.p.bright, this.bloomA, { uTex: this.scene.tex }, { uTexel: [2 / w, 2 / h] });
+    // 빛 번짐: 밝은 부분만 골라 작게 줄인 뒤 흐리게 (knee: 번지기 시작·가득 차는 밝기)
+    this.pass(this.p.bright, this.bloomA, { uTex: this.scene.tex }, { uTexel: [2 / w, 2 / h], uKnee: opts.knee || [0, 0] });
     this.pass(this.p.blur, this.bloomB, { uTex: this.bloomA.tex }, { uDir: [1.5 / this.bloomA.w, 0] });
     this.pass(this.p.blur, this.bloomA, { uTex: this.bloomB.tex }, { uDir: [0, 1.5 / this.bloomA.h] });
     this.pass(this.p.blur, this.bloomB, { uTex: this.bloomA.tex }, { uDir: [3.5 / this.bloomA.w, 0] });   // 한 번 더 넓게 → 부드럽게 퍼지는 빛
     this.pass(this.p.blur, this.bloomA, { uTex: this.bloomB.tex }, { uDir: [0, 3.5 / this.bloomA.h] });
+
+    // 먼 곳 흐림: 먼 곳 색만 골라 작게 줄인 뒤 흐리게 (bloomB는 위에서 다 썼으니 잠깐 빌려 씀)
+    const dof = CONFIG.graphics.softFocus && opts.dof ? opts.dof : null;
+    if (dof) {
+      this.pass(this.p.soft, this.softA, { uTex: this.scene.tex, uDepth: this.depthTex }, { uTexel: [1 / w, 1 / h], uNearFar: nf, uRange: [dof[0], dof[1]] });
+      this.pass(this.p.blur, this.bloomB, { uTex: this.softA.tex }, { uDir: [1.25 / this.softA.w, 0] });
+      this.pass(this.p.blur, this.softA, { uTex: this.bloomB.tex }, { uDir: [0, 1.25 / this.softA.h] });
+    }
 
     // 빛줄기 (해가 화면 쪽에 있을 때만)
     const rays = opts.rayStrength > 0.01;
@@ -156,7 +167,6 @@ const Post = {
     // 주변 가림 (반 크기로 계산 → 가로·세로로 흐리게)
     const ssao = CONFIG.graphics.ssao;
     if (ssao) {
-      const nf = [opts.near, opts.far];
       this.pass(this.p.ssao, this.ao, { uDepth: this.depthTex },
         { uProjXY: [opts.proj[0], opts.proj[5]], uNearFar: nf, uRadius: 0.55 });
       this.pass(this.p.aoBlur, this.aoTmp, { uTex: this.ao.tex, uDepth: this.depthTex }, { uDir: [2 / w, 0], uNearFar: nf });
@@ -164,9 +174,10 @@ const Post = {
     }
 
     this.pass(this.p.composite, null,
-      { uScene: this.scene.tex, uBloom: this.bloomA.tex, uRays: this.rays.tex, uAO: this.ao.tex },
+      { uScene: this.scene.tex, uBloom: this.bloomA.tex, uRays: this.rays.tex, uAO: this.ao.tex,
+        uSoft: dof ? this.softA.tex : this.bloomA.tex, uDepth: this.depthTex },
       {
-        uBloomStrength: CONFIG.graphics.bloom,
+        uBloomStrength: CONFIG.graphics.bloom * (opts.bloomScale || 1),   // 테마별 배율
         uAOStrength: ssao ? (opts.ao ?? 0.85) : 0,   // 숲은 약하게 (풀밭이 얼룩지지 않게)
         uSat: opts.sat ?? 1.22,                       // 테마별 색 보정 (값이 없으면 예전 그대로)
         uContrast: opts.contrast ?? 1.05,
@@ -178,6 +189,18 @@ const Post = {
         uAspect: w / h,
         uFlashAdd: V3.scale(opts.flashColor || [0.55, 0.65, 0.9], (opts.flash || 0) * 0.55),
         uGrade: opts.grade || [1, 1, 1],
+        // 아래는 모두 0이면 예전 그대로 (노을·동굴은 값이 없어 바뀌지 않음)
+        uCurve: opts.curve || [0, 0, 0],
+        uShadeTint: opts.shadeTint || [0, 0, 0],
+        uHighTint: opts.highTint || [0, 0, 0],
+        uSkyKeep: opts.skyKeep || 0,
+        uDarkDesat: opts.darkDesat || 0,
+        uBloomScreen: opts.bloomScreen || 0,
+        uBloomTint: opts.bloomTint || [0, 0, 0],
+        uNearFar: nf,
+        uDof: dof || [0, 0, 0],
+        uVeil: opts.veil || [0, 0, 0],
+        uVeilK: opts.veilK || [0, 0, 0],
       });
 
     gl.enable(gl.DEPTH_TEST);
