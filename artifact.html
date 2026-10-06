@@ -1,0 +1,41 @@
+<title>전사의 여정</title>
+<!-- Claude 아티팩트(Claude 안에서 열리는 페이지)로 올릴 때 쓰는 시작 파일.
+     index.html과 같은 게임이고, 아티팩트가 <html>·<head>를 자동으로 감싸 주기 때문에 그 부분만 뺐습니다.
+     index.html의 <script> 목록을 바꾸면 여기도 똑같이 바꿔 주세요. -->
+<style>
+  /* 한 가지 모습(밤하늘처럼 검은 바탕 위 전체 화면 게임)으로 고정 */
+  :root { color-scheme: dark; --bg: #000; --fg: #fff; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  canvas { position: fixed; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+  #hud { cursor: crosshair; }
+  #error {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    padding: 24px; color: var(--fg); text-align: center; font: 18px "Malgun Gothic", sans-serif;
+  }
+</style>
+<canvas id="view"></canvas>
+<canvas id="hud"></canvas>
+<div id="error"></div>
+
+<script src="js/config.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/math3d.js"></script>
+<script src="js/input.js"></script>
+<script src="js/gl.js"></script>
+<script src="js/shaders.js"></script>
+<script src="js/art.js"></script>
+<script src="js/weapons.js"></script>
+<script src="js/levels.js"></script>
+<script src="js/map.js"></script>
+<script src="js/camera.js"></script>
+<script src="js/player.js"></script>
+<script src="js/character.js"></script>
+<script src="js/cape.js"></script>
+<script src="js/particles.js"></script>
+<script src="js/enemies.js"></script>
+<script src="js/skills.js"></script>
+<script src="js/post.js"></script>
+<script src="js/render.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
