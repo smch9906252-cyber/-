@@ -41,6 +41,7 @@ const Game = {
     Skills.reset();
     Cape.reset();
     UI.buildMinimap();
+    Sound.setAmbient();
     this.levelStart = this.time;
     this.cleared = false;
     this.deathTimer = 0;
@@ -72,6 +73,8 @@ const Game = {
       Camera.toggle();
       UI.toast(Camera.isFirst ? '1인칭 시점' : '3인칭 시점');
     }
+    if (Input.wasPressed('KeyM')) Sound.toggleMute();
+    Sound.update(dt);
     const p = this.player;
     p.update(dt, this.time);
     Enemies.update(dt, p, this.time);
@@ -87,7 +90,8 @@ const Game = {
     if (!this.cleared && Enemies.remaining === 0) {
       this.cleared = true;
       World.gateOpen = true;
-      UI.message('모든 적을 물리쳤다!', '출구의 봉인이 풀렸다');
+      Sound.play('chime');
+      UI.message(World.level.clearTitle || '모든 적을 물리쳤다!', '출구의 봉인이 풀렸다');
     }
     World.barrierFade += ((World.gateOpen ? 0 : 1) - World.barrierFade) * Math.min(1, dt * 1.5);
     const g = World.gate;
@@ -108,7 +112,7 @@ const Game = {
       this.fadeTo(() => this.loadLevel(this.levelIndex + 1));
     } else if (!this.finished) {
       this.finished = true;
-      UI.message('제1장 숲을 돌파했다!', '동굴 편은 다음 단계에서 이어집니다');
+      UI.message('제2장 동굴을 돌파했다!', '이야기는 다음 단계에서 이어집니다');
     }
   },
 
@@ -145,13 +149,13 @@ const AutoQuality = {
   },
 };
 
-// 브라우저 창 크기에 맞춰 화면 해상도 조절 (너무 크면 느려지므로 약 260만 화소까지)
+// 브라우저 창 크기에 맞춰 화면 해상도 조절 (너무 크면 느려지므로 CONFIG.graphics.maxPixels 화소까지)
 function resize() {
   if (!UI.canvas) return;   // 시작에 실패했으면 무시
   const w = window.innerWidth, h = window.innerHeight;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   let scale = dpr * CONFIG.graphics.renderScale * AutoQuality.scale;
-  scale = Math.min(scale, Math.sqrt(2.6e6 / (w * h)));
+  scale = Math.min(scale, Math.sqrt(CONFIG.graphics.maxPixels / (w * h)));
   viewCanvas.width = Math.round(w * scale);
   viewCanvas.height = Math.round(h * scale);
   UI.resize(Math.round(w * dpr), Math.round(h * dpr));
@@ -170,7 +174,11 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
+// 휴대폰·태블릿(터치 화면만 있는 기기): 무거운 효과를 줄이고 시작
+if (matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches) Object.assign(CONFIG.graphics, CONFIG.mobileGraphics);
 Input.init(hudCanvas);
+TouchControls.init(hudCanvas);
+Sound.init();
 window.addEventListener('resize', resize);
 try {
   if (Game.start()) {

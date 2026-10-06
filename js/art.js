@@ -2,7 +2,7 @@
 // 나뭇잎은 '잎 무늬 그림(텍스처)'을 붙인 작은 판을 잔뜩 꽂아 풍성하게 만듭니다.
 
 // 색의 네 번째 값 = 재질. 0~1은 금속 반짝임, 음수는 아래 재질 번호 (셰이더가 질감을 다르게 그림)
-const MAT = { LEAF: -1, CARD: -2, BARK: -3, ROCK: -4, CLOTH: -5, GLOW: -6, SKIN: -7, HAIR: -8 };
+const MAT = { LEAF: -1, CARD: -2, BARK: -3, ROCK: -4, CLOTH: -5, GLOW: -6, SKIN: -7, HAIR: -8, CRYSTAL: -9 };
 const rgb = (hex, m = 0) => Utils.color(hex, m);
 
 const COLORS = {
@@ -45,6 +45,14 @@ const COLORS = {
   snow: rgb('#f2f5fa'),
   cliff: rgb('#7d838e'),
   farForest: rgb('#2c5a3c'),
+  caveRock: rgb('#6b655d', MAT.ROCK),     // 동굴 바위 (따뜻한 회갈색)
+  caveCeil: rgb('#4a4540', MAT.ROCK),     // 동굴 천장 (더 어둡게)
+  crystal: rgb('#e6f6ff', MAT.CRYSTAL),   // 수정 (색은 배치할 때 하늘빛·보랏빛으로 물들임)
+  crystalBase: rgb('#3c3a3e', MAT.ROCK),
+  iron: rgb('#3a3c40', 0.5),
+  coal: rgb('#ff7a24', MAT.GLOW),         // 횃불 화로 속 숯불
+  shroomCap: rgb('#62f0e8', MAT.GLOW),    // 빛나는 버섯 갓
+  shroomStem: rgb('#cfd8d0'),
 };
 
 // 색을 조금씩 다르게 (재질 번호는 그대로)
@@ -742,6 +750,109 @@ function buildFarTree(rnd) {
   return b;
 }
 
+// ---------- 동굴 ----------
+
+// 동굴 벽 바위: 위아래로 긴 울퉁불퉁한 덩어리 (높이 약 9m, 꼭대기는 천장 속에 묻힘)
+function buildCliffRock(rnd) {
+  const b = new MeshBuilder();
+  const c = () => vary(COLORS.caveRock, 0.14, rnd);
+  Shapes.icosphere(b, M4.chain(M4.translation(0, 4, 0), M4.scaling(1.7, 5.2, 1.5)), 2, c, { rnd, jitter: 0.35 });
+  Shapes.icosphere(b, M4.chain(M4.translation(0.9, 0.6, 0.4), M4.scaling(1.1, 1.0, 1.0)), 1, c, { rnd, jitter: 0.4 });   // 발치에 걸친 돌
+  return b;
+}
+
+// 석순: 바닥에서 솟은 뾰족한 돌기둥 (큰 것 하나 + 작은 것 둘)
+function buildStalagmite(rnd) {
+  const b = new MeshBuilder();
+  const c = () => vary(COLORS.caveRock, 0.1, rnd);
+  Shapes.cylinder(b, M4.translation(0, -0.1, 0), 0.5, 0.05, 2.6, 8, c, { rnd, jitter: 0.25, top: false });
+  Shapes.cylinder(b, M4.translation(0.45, -0.1, 0.2), 0.25, 0.03, 1.2, 7, c, { rnd, jitter: 0.25, top: false });
+  Shapes.cylinder(b, M4.translation(-0.3, -0.1, -0.35), 0.2, 0.02, 0.8, 6, c, { rnd, jitter: 0.25, top: false });
+  return b;
+}
+
+// 종유석: 천장에 매달린 고드름 모양 (원점 = 천장, 아래로 자람)
+function buildStalactite(rnd) {
+  const b = new MeshBuilder();
+  const c = () => vary(COLORS.caveCeil, 0.12, rnd);
+  const down = M4.rotationX(Math.PI);
+  Shapes.cylinder(b, M4.chain(M4.translation(0, 0.3, 0), down), 0.4, 0.03, 2.0, 7, c, { rnd, jitter: 0.25, top: false });
+  Shapes.cylinder(b, M4.chain(M4.translation(0.5, 0.3, 0.1), down), 0.22, 0.02, 1.1, 6, c, { rnd, jitter: 0.25, top: false });
+  Shapes.cylinder(b, M4.chain(M4.translation(-0.35, 0.3, 0.3), down), 0.18, 0.02, 0.7, 6, c, { rnd, jitter: 0.25, top: false });
+  return b;
+}
+
+// 수정 덩어리: 바위 받침에서 여러 방향으로 솟은 육각 기둥 (끝은 뾰족). 면마다 빛이 달라 반짝임
+function buildCrystal(rnd) {
+  const b = new MeshBuilder();
+  Shapes.icosphere(b, M4.chain(M4.translation(0, 0.05, 0), M4.scaling(0.75, 0.3, 0.7)), 1, () => vary(COLORS.crystalBase, 0.1, rnd), { rnd, jitter: 0.4 });
+  const spikes = [[0, 1, 0, 0.2, 1.7], [0.5, 0.8, 0.2, 0.14, 1.1], [-0.5, 0.85, 0.1, 0.15, 1.2], [0.15, 0.75, -0.6, 0.12, 0.9],
+    [-0.2, 0.7, 0.6, 0.11, 0.8], [0.7, 0.5, -0.4, 0.08, 0.5], [-0.6, 0.45, -0.45, 0.09, 0.6]];
+  for (const [dx, dy, dz, r, len] of spikes) {
+    const d = V3.normalize([dx + (rnd() - 0.5) * 0.15, dy, dz + (rnd() - 0.5) * 0.15]);
+    const p0 = [d[0] * 0.15, 0.1, d[2] * 0.15], p1 = V3.add(p0, V3.scale(d, len)), tip = V3.add(p1, V3.scale(d, r * 1.8));
+    const c = () => vary(COLORS.crystal, 0.06, rnd);
+    Shapes.segment(b, p0, p1, r, r * 0.9, 6, c, { top: false });
+    Shapes.segment(b, p1, tip, r * 0.9, 0, 6, c);
+  }
+  return b;
+}
+
+// 화로 횃불: 나무 기둥 + 쇠 화로 + 숯불 (불꽃은 particles.js가 피워 올림)
+function buildTorch(rnd) {
+  const b = new MeshBuilder();
+  const sm = { smooth: true };
+  Shapes.cylinder(b, M4.identity(), 0.09, 0.07, 1.45, 8, () => vary(COLORS.bark, 0.1, rnd), sm);
+  for (let i = 0; i < 3; i++) {   // 바닥을 받친 다리
+    const a = (i / 3) * Math.PI * 2;
+    Shapes.segment(b, [Math.cos(a) * 0.35, 0, Math.sin(a) * 0.35], [0, 0.5, 0], 0.035, 0.03, 5, () => COLORS.iron);
+  }
+  Shapes.cylinder(b, M4.translation(0, 1.42, 0), 0.12, 0.3, 0.26, 10, () => COLORS.iron, { bottom: true });
+  Shapes.cylinder(b, M4.translation(0, 1.66, 0), 0.31, 0.31, 0.04, 10, () => COLORS.iron, sm);   // 화로 테
+  Shapes.icosphere(b, M4.chain(M4.translation(0, 1.66, 0), M4.scaling(0.26, 0.08, 0.26)), 1, () => COLORS.coal, sm);
+  return b;
+}
+
+// 천장 구멍 가장자리에 늘어진 덩굴 (원점 = 천장, 아래로 늘어짐). 가는 잎 띠 여러 가닥
+function buildVines(rnd) {
+  const b = new MeshBuilder();
+  for (let k = 0; k < 5; k++) {
+    const ox = (rnd() - 0.5) * 0.8, oz = (rnd() - 0.5) * 0.8, len = 1.2 + rnd() * 1.8, n = 7, w = 0.05 + rnd() * 0.04;
+    const c = vary(COLORS.leaf[(rnd() * 4) | 0], 0.15, rnd);
+    let prev = null;
+    for (let i = 0; i <= n; i++) {
+      const t = i / n, y = 0.2 - t * len, sway = Math.sin(t * 5 + k) * 0.08 * t;
+      const p = [ox + sway, y, oz + Math.cos(t * 4 + k) * 0.06 * t];
+      const half = w * (1 - t * 0.5);
+      const cur = [V3.add(p, [-half, 0, 0]), V3.add(p, [half, 0, 0])];
+      if (prev) {
+        const nrm = [0, 0, 1];
+        for (const q of [prev[0], prev[1], cur[1], prev[0], cur[1], cur[0]]) b.vert(q, nrm, c, t * 0.15);
+      }
+      prev = cur;
+      if (i > 0 && i < n && rnd() < 0.6) {   // 작은 잎
+        const s = 0.07 + rnd() * 0.05, side = rnd() < 0.5 ? -1 : 1;
+        const l0 = p, l1 = V3.add(p, [side * s, -s * 0.5, s * 0.3]), l2 = V3.add(p, [side * s * 0.4, -s * 1.1, 0]);
+        b.vert(l0, [0, 0, 1], c, t * 0.15); b.vert(l1, [0, 0, 1], c, t * 0.15); b.vert(l2, [0, 0, 1], c, t * 0.15);
+      }
+    }
+  }
+  return b;
+}
+
+// 빛나는 버섯 무리 (동굴 바닥 벽가에)
+function buildGlowShroom(rnd) {
+  const b = new MeshBuilder();
+  const sm = { smooth: true };
+  for (let i = 0; i < 5; i++) {
+    const a = rnd() * Math.PI * 2, d = i === 0 ? 0 : 0.1 + rnd() * 0.2, h = 0.08 + rnd() * 0.14, r = 0.04 + rnd() * 0.05;
+    const x = Math.cos(a) * d, z = Math.sin(a) * d;
+    Shapes.cylinder(b, M4.translation(x, 0, z), r * 0.35, r * 0.3, h, 6, () => COLORS.shroomStem, sm);
+    Shapes.cylinder(b, M4.translation(x, h, z), r, r * 0.15, r * 0.7, 8, () => COLORS.shroomCap, { smooth: true, bottom: true });
+  }
+  return b;
+}
+
 // ---------- 검과 팔 (1인칭) ----------
 
 // 전설의 검 '발뭉' + 철 장갑 낀 주먹 (손 = 원점, 칼날은 +y 방향)
@@ -823,6 +934,13 @@ const Models = {
     this.ruin = buildRuin(Utils.rng(28));
     this.farTree = buildFarTree(Utils.rng(30));
     this.gate = buildGate(Utils.rng(29));
+    this.cliffRock = buildCliffRock(Utils.rng(40));
+    this.stalagmite = buildStalagmite(Utils.rng(41));
+    this.stalactite = buildStalactite(Utils.rng(42));
+    this.crystal = buildCrystal(Utils.rng(43));
+    this.torch = buildTorch(Utils.rng(44));
+    this.glowShroom = buildGlowShroom(Utils.rng(45));
+    this.vines = buildVines(Utils.rng(46));
     this.sword = buildSword();
     this.arm = buildArm();
   },

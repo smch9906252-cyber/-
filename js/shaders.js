@@ -79,6 +79,7 @@ uniform mat4 uLightVP;
 uniform mat4 uLightVPNear;
 uniform highp sampler2DShadow uShadowMap;
 uniform highp sampler2DShadow uShadowNear;
+uniform float uShadowOutside;   // 그림자 지도 바깥의 밝기 (숲 1 = 햇빛, 동굴 0 = 천장에 가려 어두움)
 const vec2 POISSON[12] = vec2[12](
   vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457), vec2(-0.203, 0.621),
   vec2(0.962, -0.195), vec2(0.473, -0.480), vec2(0.519, 0.767), vec2(0.185, -0.893),
@@ -93,8 +94,8 @@ float shadowAt(vec3 w) {
   vec4 cf = uLightVP * vec4(w, 1.0);
   vec3 pf = cf.xyz / cf.w * 0.5 + 0.5;
   float edgeF = max(abs(pf.x - 0.5), abs(pf.y - 0.5)) * 2.0;
-  float sf = 1.0;
-  if (edgeF < 1.0 && pf.z < 1.0) sf = mix(pcf(uShadowMap, pf, 1.6, 0.0004), 1.0, smoothstep(0.85, 1.0, edgeF));
+  float sf = uShadowOutside;
+  if (edgeF < 1.0 && pf.z < 1.0) sf = mix(pcf(uShadowMap, pf, 1.6, 0.0004), uShadowOutside, smoothstep(0.85, 1.0, edgeF));
   vec4 cn = uLightVPNear * vec4(w, 1.0);
   vec3 pn = cn.xyz / cn.w * 0.5 + 0.5;
   float edgeN = max(abs(pn.x - 0.5), abs(pn.y - 0.5)) * 2.0;
@@ -105,8 +106,10 @@ float shadowAt(vec3 w) {
 
 // 자연 효과 (uTime이 먼저 선언되어 있어야 함)
 const GLSL_ENV = `
-// 구름 그림자: 땅 위를 천천히 흘러감 (1 = 햇빛, 0.5 = 그늘)
+// 구름 그림자: 땅 위를 천천히 흘러감 (1 = 햇빛, 0.5 = 그늘). uClouds가 0이면 없음 (동굴)
+uniform float uClouds;
 float cloudShadow(vec3 w) {
+  if (uClouds < 0.5) return 1.0;
   vec2 p = w.xz * 0.015 + uTime * vec2(0.02, 0.008);
   float c = vnoise(p) * 0.55 + vnoise(p * 2.1 + 7.3) * 0.3 + vnoise(p * 4.3 - 2.1) * 0.15;
   return 1.0 - smoothstep(0.5, 0.68, c) * 0.5;
@@ -193,6 +196,10 @@ uniform float uDim;        // 궁극기 때 세상을 어둡게 물들임 (0~1).
 uniform vec3 uDimTint;
 uniform vec4 uGlowSwap;    // w가 1이면 스스로 빛나는 부분을 이 색으로 (용사 갑옷 빛줄기가 무기 속성 색을 따라감)
 uniform vec3 uRuneColor;   // 망토 문장의 칼날 실 색
+uniform float uCelAmbient; // 캐릭터 그늘 밝기 (숲 1, 어두운 동굴은 낮게)
+uniform vec4 uLights[12];      // 주변을 비추는 빛 (횃불·수정·검): xyz 위치, w 닿는 거리(m)
+uniform vec3 uLightColors[12];
+uniform int uLightCount;
 uniform sampler2D uLeafTex;
 out vec4 outColor;
 ${GLSL_NOISE}
@@ -234,6 +241,20 @@ vec3 rockTexture(vec3 base, vec3 w, vec3 n) {
   return mix(c, vec3(0.09, 0.19, 0.04) * (0.8 + 0.4 * fine), moss);
 }
 
+// 횃불·수정 같은 점 빛을 모두 더함 (거리에 따라 부드럽게 약해짐, wrap: 빛이 뒤쪽까지 감기는 정도)
+vec3 pointLights(vec3 w, vec3 n, float wrap) {
+  vec3 sum = vec3(0.0);
+  for (int i = 0; i < 12; i++) {
+    if (i >= uLightCount) break;
+    vec3 d = uLights[i].xyz - w;
+    float dist = length(d);
+    float att = 1.0 - clamp(dist / uLights[i].w, 0.0, 1.0);
+    float ndl = (dot(n, d / max(dist, 0.001)) + wrap) / (1.0 + wrap);
+    sum += uLightColors[i] * att * att * smoothstep(0.0, 0.35, ndl);
+  }
+  return sum;
+}
+
 void main() {
   if (vWorld.y < uClipY) discard;
   if (uCamFade > 0.5) {
@@ -244,7 +265,7 @@ void main() {
     float keep = min(smoothstep(0.6, 2.2, length(vWorld - uCamPos)), 0.12 + line);
     if (hash12(floor(gl_FragCoord.xy)) > keep) discard;
   }
-  int mat = vColor.a < -0.5 ? int(-vColor.a + 0.5) : 0;   // 1 잎, 2 잎 판, 3 나무껍질, 4 바위, 5 천
+  int mat = vColor.a < -0.5 ? int(-vColor.a + 0.5) : 0;   // 1 잎, 2 잎 판, 3 나무껍질, 4 바위, 5 천, 6 빛남, 7 피부, 8 머리카락, 9 수정
   float shine = max(vColor.a, 0.0);
   vec3 base = vColor.rgb;
   if (mat == 2) {   // 잎 판: 잎 무늬 그림에서 잎이 없는 곳은 뚫음
@@ -287,7 +308,7 @@ void main() {
   bool skin = mat == 7, hairMat = mat == 8;
   if (uGrass > 0.5) base *= 1.0 + vGust * smoothstep(0.0, 0.08, vWind) * 0.3;    // 바람 물결이 지나가면 풀끝이 반짝
 
-  float sh = (uShadowOn > 0.5 ? shadowAt(vWorld) : 1.0) * cloudShadow(vWorld);
+  float sh = (uShadowOn > 0.5 ? shadowAt(vWorld) : uShadowOutside) * cloudShadow(vWorld);
   float under = uGroundDetail > 0.5 ? clamp(uWaterLevel - vWorld.y, 0.0, 3.0) : 0.0;   // 물속 깊이
   if (under > 0.0) base = mix(base, base * vec3(0.5, 0.78, 0.8), smoothstep(0.0, 0.5, under));
   float wrap = leafy ? 0.5 : skin ? 0.35 : 0.05;
@@ -303,8 +324,8 @@ void main() {
     vec3 tint = skin ? vec3(1.0, 0.72, 0.7) : hairMat ? vec3(0.6, 0.62, 0.85) : vec3(0.66, 0.68, 0.88);
     vec3 warm = uSunColor / max(uSunColor.r, 0.001);
     float litK = shine > 0.0 ? 1.7 : 2.0;   // 금속은 조금 덜 밝게 (반짝임이 돋보이게)
-    col = base * mix(tint * 0.95, mix(vec3(1.0), warm, 0.45) * litK, ramp);
-    col += base * uSunColor * 0.45 * smoothstep(0.62, 0.82, 1.0 - max(dot(n, v), 0.0)) * (0.35 + 0.65 * ramp);   // 윤곽을 따라 밝은 테두리 빛
+    col = base * mix(tint * 0.95 * uCelAmbient, mix(vec3(1.0), warm, 0.45) * litK, ramp);
+    col += base * uSunColor * 0.45 * smoothstep(0.62, 0.82, 1.0 - max(dot(n, v), 0.0)) * (0.35 * uCelAmbient + 0.65 * ramp);   // 윤곽을 따라 밝은 테두리 빛
     if (shine > 0.0) {   // 애니메이션풍 금속: 하늘이 비치는 쪽은 밝게, 땅이 비치는 쪽은 어둡게 또렷이 나뉨
       vec3 r = reflect(-v, n);
       float skyR = smoothstep(-0.06, 0.06, r.y);
@@ -328,6 +349,11 @@ void main() {
     col += (uSunColor * spec * sh * 0.9 + uSkyColor * rim * 0.9) * shine;
   }
   if (under > 0.0) col += uSunColor * caustic(vWorld.xz) * 0.5 * sh * smoothstep(0.0, 0.15, under) * exp(-under * 1.2);
+  if (uLightCount > 0) col += base * pointLights(vWorld, n, leafy ? 0.5 : 0.15) * (uCel > 0.5 ? 1.5 : 1.0);
+  if (mat == 9) {   // 수정: 속에서 은은히 빛나고, 비스듬히 보이는 면은 더 밝게 반짝임
+    float fres = pow(1.0 - max(dot(n, v), 0.0), 2.0);
+    col = col * 0.5 + base * (0.9 + 0.25 * sin(uTime * 1.7 + vWorld.x * 2.0 + vWorld.z)) + base * fres * 1.6;
+  }
   if (mat == 6) col = (uGlowSwap.w > 0.5 ? uGlowSwap.rgb : base) * (2.6 + 0.6 * sin(uTime * 2.6 + vWorld.y * 3.0));   // 스스로 빛나는 부분 (룬, 괴물 눈): 숨 쉬듯 은은하게 밝아졌다 어두워짐
   col = mix(col, vec3(2.4), uFlash);
   float dist = length(vWorld - uCamPos);
@@ -585,13 +611,22 @@ uniform float uTime;
 uniform float uAmount;   // 진하기 (0이면 안 보임)
 uniform float uMode;
 uniform float uBaseY;
+uniform float uHeight;   // 빛줄기 높이 (모드 2)
+uniform vec3 uColor;     // 빛줄기 색 (모드 2)
 uniform vec3 uCamPos;
 out vec4 outColor;
 ${GLSL_NOISE}
 void main() {
   vec3 col;
   float a;
-  if (uMode < 0.5) {
+  if (uMode > 1.5) {   // 동굴 천장 구멍으로 쏟아지는 빛줄기: 가장자리는 부드럽게, 위가 진하고 바닥 쪽은 옅게, 먼지가 천천히 흐름
+    vec3 v = normalize(uCamPos - vWorld);
+    float soft = pow(abs(dot(normalize(vNormal), v)), 1.5);
+    float h = clamp((vWorld.y - uBaseY) / uHeight, 0.0, 1.0);
+    float dust = 0.7 + 0.3 * vnoise(vec2(vWorld.x * 1.3 + vWorld.z, vWorld.y * 0.8 - uTime * 0.3) * 1.5);
+    a = soft * smoothstep(0.0, 0.3, h) * (0.3 + 0.7 * h) * smoothstep(1.0, 0.8, h) * dust * 0.38;
+    col = uColor;
+  } else if (uMode < 0.5) {
     float n = vnoise(vUV * vec2(6.0, 8.0) + vec2(0.0, -uTime * 0.8));
     float stripes = 0.5 + 0.5 * sin(vUV.y * 40.0 - uTime * 4.0);
     float edge = smoothstep(0.12, 0.0, min(min(vUV.x, 1.0 - vUV.x), 1.0 - vUV.y));

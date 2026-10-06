@@ -1,4 +1,4 @@
-// 적: 슬라임·고블린·해골 궁수의 모습(3D 모델)과 행동(AI), 그리고 화살
+// 적: 슬라임·고블린·해골 궁수·박쥐의 모습(3D 모델)과 행동(AI), 그리고 화살
 // 능력치는 config.js의 enemies, 구역별 마릿수는 config.js의 levels에서 정합니다.
 
 // 적 색 (네 번째 값: 0~1 반짝임, MAT.GLOW는 스스로 빛남, MAT.CLOTH는 천)
@@ -28,6 +28,11 @@ const MON = {
   iron: Utils.color('#5a5f66', 0.6),
   hood: Utils.color('#2a2036', MAT.CLOTH),
   shine: Utils.color('#ffffff', MAT.GLOW),
+  batFur: Utils.color('#3d2b47', MAT.CLOTH),
+  batWing: Utils.color('#2b1f36', MAT.CLOTH),
+  batBone: Utils.color('#1c1424'),
+  batEar: Utils.color('#8a5274'),
+  batEye: Utils.color('#ff5a2a', MAT.GLOW),
 };
 const SLIME_TINTS = [[1, 1, 1], [0.6, 1.2, 0.55], [1.3, 0.7, 1.15]];   // 파랑·초록·보라 슬라임
 
@@ -186,6 +191,41 @@ function buildSkeletonParts() {
   };
 }
 
+// 박쥐: 동그란 털북숭이 몸, 큰 귀, 빛나는 눈, 송곳니. 날개는 따로 (펄럭이도록)
+function buildBatParts() {
+  const T = M4.translation, S = M4.scaling, ch = M4.chain;
+  // 날개 하나: 몸 쪽 뿌리가 원점, 바깥(side 쪽 x)으로 뻗은 팔뼈와 손가락뼈 사이에 얇은 막 (앞뒤 양면)
+  const wing = (side) => makePart((b) => {
+    const root = [0, 0, 0], elbow = [side * 0.2, 0.05, -0.05], wrist = [side * 0.4, 0.03, -0.03];
+    const tips = [[side * 0.66, -0.01, 0.02], [side * 0.6, -0.08, 0.15], [side * 0.42, -0.1, 0.24], [side * 0.18, -0.05, 0.2]];
+    const membrane = [[root, elbow, tips[3]], [elbow, wrist, tips[3]], [wrist, tips[2], tips[3]], [wrist, tips[1], tips[2]], [wrist, tips[0], tips[1]]];
+    for (const [a, c, d] of membrane) {
+      b.tri(a, c, d, MON.batWing);
+      b.tri(a, d, c, MON.batWing);
+    }
+    Shapes.segment(b, root, elbow, 0.022, 0.018, 5, col('batBone'));
+    Shapes.segment(b, elbow, wrist, 0.018, 0.014, 5, col('batBone'));
+    for (const t of tips.slice(0, 3)) Shapes.segment(b, wrist, t, 0.01, 0.004, 4, col('batBone'));
+    Shapes.segment(b, wrist, V3.add(wrist, [side * 0.02, 0.06, -0.03]), 0.012, 0.002, 4, col('batBone'));   // 날개 끝 갈고리
+  });
+  return {
+    batBody: makePart((b) => {
+      Shapes.icosphere(b, S(0.15, 0.13, 0.19), 2, col('batFur'), SM);
+      Shapes.icosphere(b, ch(T(0, 0.06, -0.17), S(0.11, 0.1, 0.1)), 2, col('batFur'), SM);        // 머리
+      Shapes.icosphere(b, ch(T(0, 0.03, -0.26), S(0.045, 0.035, 0.04)), 1, col('batEar'), SM);     // 들창코
+      for (const sx of [-1, 1]) {
+        Shapes.segment(b, [sx * 0.05, 0.12, -0.17], [sx * 0.11, 0.3, -0.13], 0.05, 0.005, 6, col('batFur'), SM);   // 큰 귀
+        Shapes.segment(b, [sx * 0.055, 0.13, -0.185], [sx * 0.1, 0.26, -0.15], 0.028, 0.004, 5, col('batEar'), SM);
+        Shapes.icosphere(b, ch(T(sx * 0.045, 0.08, -0.255), S(0.024, 0.026, 0.015)), 1, col('batEye'), SM);
+        Shapes.segment(b, [sx * 0.02, 0.0, -0.25], [sx * 0.02, -0.05, -0.245], 0.009, 0.0, 4, col('white'));       // 송곳니
+        Shapes.segment(b, [sx * 0.05, -0.08, 0.1], [sx * 0.05, -0.16, 0.18], 0.015, 0.01, 4, col('batBone'));      // 늘어진 다리
+      }
+    }),
+    batWingR: wing(1),
+    batWingL: wing(-1),
+  };
+}
+
 // 화살 (앞쪽은 -z)
 function buildArrow() {
   return makePart((b) => {
@@ -227,6 +267,12 @@ const SKELETON_RIG = [
   ['kneeR', 'hipR', [0, -0.45, 0], 'sShin'],
   ['hipL', 'hips', [-0.09, -0.03, 0], 'sThigh'],
   ['kneeL', 'hipL', [0, -0.45, 0], 'sShin'],
+];
+
+const BAT_RIG = [
+  ['body', null, [0, 0, 0], 'batBody'],
+  ['wingR', 'body', [0.1, 0.04, -0.02], 'batWingR'],
+  ['wingL', 'body', [-0.1, 0.04, -0.02], 'batWingL'],
 ];
 
 // ---------- 움직임(포즈) ----------
@@ -287,6 +333,23 @@ function poseSkeleton(e, time) {
   return { pose, ys: {} };
 }
 
+// 박쥐: 쉬지 않고 날갯짓 (예고 때는 더 빠르게, 덮칠 때는 날개를 접고 머리부터 내리꽂음)
+function poseBat(e, time) {
+  const fast = e.state === 'windup' ? 2.2 : 1;
+  const f = Math.sin(time * 15 * fast + e.seed * 20);
+  let flap = 0.25 + f * 0.85, pitch = 0;
+  if (e.state === 'swoop') {
+    flap = -0.6 + f * 0.1;   // 날개를 뒤로 접음
+    pitch = -0.6;
+  } else if (e.state === 'windup') pitch = 0.3;   // 몸을 젖히고 노려봄
+  if (e.flinch > 0) pitch += 0.6 * Math.sin((e.flinch / FLINCH_TIME) * Math.PI * 0.5);
+  if (e.dead) {   // 쓰러짐: 날개가 축 늘어져 파닥거림
+    flap = -0.9 + Math.sin(time * 30) * 0.15 * Utils.clamp(e.deathTimer - 0.4, 0, 1);
+    pitch = 0;
+  }
+  return { pose: { body: J(pitch, 0, Math.sin(time * 3 + e.seed * 7) * 0.15), wingR: J(0, 0, flap), wingL: J(0, 0, -flap) }, ys: {} };
+}
+
 // 맞은 순간 움찔: 상체가 뒤로 젖혀지고 팔이 들림 (금방 돌아옴)
 const FLINCH_TIME = 0.28;
 function hitReact(e, pose) {
@@ -341,11 +404,30 @@ class Enemy {
     this.deathKind = null;      // 쓰러뜨린 무기 속성 (흩어지는 모습이 다름)
     this.deathFx = false;
     this.landed = false;
+    this.fly = type === 'bat' ? s.flyHeight : 0;   // 박쥐: 땅에서 떠 있는 높이
+    this.target = null;                              // 박쥐: 덮칠 자리
+    if (type === 'golem') {   // 보스 (boss.js)
+      this.boss = true;
+      this.state = 'sleep';
+      this.facing = Math.PI;      // 들어오는 쪽(서쪽)을 바라보며 잠듦
+      this.poise = s.poise;       // 이만큼 피해가 쌓이면 무릎 꿇음
+      this.phase = 1;             // 2 = 분노
+      this.throwCool = 3;
+      this.waves = [];            // 내리친 자리의 충격파
+      this.hpLag = s.hp;          // 체력 막대의 하얀 잔상
+    }
   }
 
   // 맞는 부위 높이 (불똥·숫자가 뜨는 곳)
   get hitHeight() {
+    if (this.type === 'bat') return this.fly + 0.12;
+    if (this.type === 'golem') return 2.5;
     return { slime: 0.45, goblin: 0.9, archer: 1.25 }[this.type];
+  }
+
+  // 머리 위 표시('!'·체력 막대)를 띄울 높이
+  get markHeight() {
+    return this.type === 'bat' ? this.fly + 0.5 : this.hitHeight * 1.5 + 0.35;
   }
 
   get hopY() {
@@ -355,6 +437,10 @@ class Enemy {
 
   hit(damage, fromX, fromZ) {
     if (this.dead) return;
+    if (this.boss) {
+      Golem.hit(this, damage);
+      return;
+    }
     this.hp -= damage;
     this.flash = 0.15;
     this.hpShow = 4;
@@ -376,16 +462,26 @@ class Enemy {
       this.state = 'chase';
       this.cool = 1;
     }
+    if (this.type === 'bat' && (this.state === 'windup' || this.state === 'swoop')) {   // 덮치기를 끊고 휘청이며 떠오름
+      this.state = 'recover';
+      this.timer = 1.0;
+      this.cool = CONFIG.enemies.bat.swoopCooldown;
+    }
     if (this.hp <= 0) {   // 쓰러짐: 맞은 반대쪽으로 날아가며 뒤로 넘어짐 → 땅에 떨어진 뒤 무기 속성대로 흩어짐
       this.dead = true;
       this.deathTimer = DEATH_TIME;
       this.deathKind = Weapons.cur.id;
       this.facing = Math.atan2(fromZ - this.z, fromX - this.x);   // 때린 쪽을 보게 → 뒤로 넘어감
+      if (this.type === 'bat') {   // 날던 높이에서 떨어짐
+        this.dy = this.fly;
+        this.fly = 0;
+      }
       const heavy = Math.min(1, damage / 30);   // 센 공격일수록 높이·멀리
       this.dvy = 3 + heavy * 3.5;
       this.kx *= 1.5 + heavy;
       this.kz *= 1.5 + heavy;
       Particles.sparks(this.x, this.groundY + this.hitHeight, this.z, 14, Weapons.cur.spark);
+      Sound.play('die', { type: this.type, x: this.x, z: this.z, range: 40 });
     }
   }
 
@@ -471,7 +567,8 @@ class Enemy {
 
   update(dt, p, time) {
     if (this.dead) {
-      this.updateDeath(dt);
+      if (this.boss) Golem.updateDeath(this, dt);
+      else this.updateDeath(dt);
       return;
     }
     this.flash = Math.max(0, this.flash - dt);
@@ -482,14 +579,17 @@ class Enemy {
     this.timer -= dt;
     const s = CONFIG.enemies[this.type];
     const dx = p.x - this.x, dz = p.z - this.z, d = Math.hypot(dx, dz);
-    if (this.state === 'idle' && d < s.detect && !p.dead) {
+    if (this.boss) this.hpLag = Math.max(this.hp, this.hpLag - this.maxHp * 0.25 * dt);   // 하얀 잔상이 천천히 줄어듦
+    if (!this.boss && this.state === 'idle' && d < s.detect && !p.dead) {
       this.state = 'chase';
       this.alert = 0.8;
     }
-    if (p.dead) this.state = 'idle';
+    if (p.dead && !this.boss) this.state = 'idle';
 
-    if (this.type === 'slime') this.updateSlime(dt, p, s, d);
+    if (this.boss) Golem.update(this, dt, p, s, d, dx, dz, time);
+    else if (this.type === 'slime') this.updateSlime(dt, p, s, d);
     else if (this.type === 'goblin') this.updateGoblin(dt, p, s, d, dx, dz);
+    else if (this.type === 'bat') this.updateBat(dt, p, s, d, dx, dz, time);
     else this.updateArcher(dt, p, s, d, dx, dz);
 
     const bumped = World.moveEntity(this, (this.vx + this.kx) * dt, (this.vz + this.kz) * dt);
@@ -589,6 +689,64 @@ class Enemy {
     }
   }
 
+  // 박쥐: 전사 머리 위를 빙빙 돌다가, 멈춰서 날갯짓을 빠르게 하면(예고) 비스듬히 내리꽂으며 덮침.
+  // 덮친 뒤엔 낮게 날며 천천히 다시 떠오름 (이때가 벨 기회)
+  updateBat(dt, p, s, d, dx, dz, time) {
+    let alt = s.flyHeight + Math.sin(time * 2.3 + this.seed * 9) * 0.25;   // 가고 싶은 높이
+    switch (this.state) {
+      case 'idle': {   // 처음 자리 위를 맴돎
+        const a = time * 0.9 + this.seed * 6.28;
+        this.steer(this.homeX + Math.cos(a) * 2.2, this.homeZ + Math.sin(a) * 2.2, s.speed * 0.5, dt);
+        break;
+      }
+      case 'chase': {   // 전사 둘레를 돌며 기회를 엿봄
+        const a = Math.atan2(-dz, -dx) + (this.seed > 0.5 ? 1 : -1) * 0.9;
+        this.steer(p.x + Math.cos(a) * s.orbit, p.z + Math.sin(a) * s.orbit, s.speed, dt, false);
+        this.face(Math.atan2(dz, dx), dt * 6);
+        if (this.cool <= 0 && d < s.orbit + 3) {
+          this.state = 'windup';
+          this.timer = 0.55;
+          Sound.play('screech', { x: this.x, z: this.z });
+        }
+        break;
+      }
+      case 'windup':   // 공중에 멈춰 날갯짓을 빠르게 (덮칠 자리를 정함)
+        this.stop(dt);
+        this.face(Math.atan2(dz, dx), dt * 10);
+        alt = s.flyHeight + 0.5;
+        this.target = { x: p.x + p.vx * 0.3, z: p.z + p.vz * 0.3 };
+        if (this.timer <= 0) {
+          this.state = 'swoop';
+          this.timer = 0.9;
+          this.hitDone = false;
+          const dir = Utils.normalize(this.target.x - this.x, this.target.z - this.z);
+          this.swoopDir = dir;
+        }
+        break;
+      case 'swoop': {   // 덮칠 자리를 향해 비스듬히 내리꽂음 (지나쳐도 그 방향으로 계속)
+        this.vx = this.swoopDir.x * s.swoopSpeed;
+        this.vz = this.swoopDir.y * s.swoopSpeed;
+        const left = Math.hypot(this.target.x - this.x, this.target.z - this.z);
+        alt = Math.max(0.9, Math.min(this.fly, 0.9 + left * 0.35));
+        if (!this.hitDone && d < this.radius + p.radius + 0.35 && this.fly < 1.9 && p.hurt(s.damage, this.x, this.z, 6)) this.hitDone = true;
+        if (this.timer <= 0) {
+          this.state = 'recover';
+          this.timer = 1.1;
+          this.cool = s.swoopCooldown;
+        }
+        break;
+      }
+      case 'recover':   // 낮게 날며 천천히 떠오름
+        this.vx *= Math.max(0, 1 - dt * 2.5);
+        this.vz *= Math.max(0, 1 - dt * 2.5);
+        alt = 1.2 + (1 - Utils.clamp(this.timer / 1.1, 0, 1)) * (s.flyHeight - 1.2);
+        if (this.timer <= 0) this.state = 'chase';
+        break;
+    }
+    const rate = this.state === 'swoop' ? 9 : 2.5;
+    this.fly += (alt - this.fly) * Math.min(1, dt * rate);
+  }
+
   // 해골 궁수: 거리를 유지하며 활을 당겼다가(예고) 쏨. 가까이 오면 뒷걸음질
   updateArcher(dt, p, s, d, dx, dz) {
     const toP = Math.atan2(dz, dx);
@@ -629,6 +787,7 @@ const Arrows = {
   spawn(x, y, z, tx, ty, tz, speed, damage) {
     const d = V3.normalize([tx - x, ty - y, tz - z]);
     this.list.push({ x, y, z, vx: d[0] * speed, vy: d[1] * speed + 0.6, vz: d[2] * speed, life: 3, stuck: false, damage });
+    Sound.play('shoot', { x, z });
   },
 
   update(dt, p) {
@@ -669,13 +828,14 @@ const Enemies = {
   models: null,   // 이름 → 모델
 
   build() {
-    this.models = Object.assign({ slime: buildSlime(), arrow: buildArrow() }, buildGoblinParts(), buildSkeletonParts());
+    this.models = Object.assign({ slime: buildSlime(), arrow: buildArrow() }, buildGoblinParts(), buildSkeletonParts(), buildBatParts(), Golem.build());
   },
 
   // 구역에 적 배치 (마릿수는 config.js의 levels)
   spawn(level, index) {
     this.list = [];
     Arrows.list = [];
+    Boulders.list = [];
     const counts = CONFIG.levels[level.id] || {};
     const rnd = Utils.rng(100 + index * 17);
     const cells = World.spawnCells();
@@ -684,16 +844,22 @@ const Enemies = {
       [cells[i], cells[j]] = [cells[j], cells[i]];
     }
     let k = 0;
-    for (const type of ['slime', 'goblin', 'archer']) {
+    for (const type of ['slime', 'goblin', 'archer', 'bat']) {
       for (let i = 0; i < (counts[type] || 0) && k < cells.length; i++, k++) {
         const c = cells[k];
         this.list.push(new Enemy(type, c.x + (rnd() - 0.5) * 0.8, c.z + (rnd() - 0.5) * 0.8, rnd));
       }
     }
+    if (counts.golem && World.bossSpot) this.list.push(new Enemy('golem', World.bossSpot.x, World.bossSpot.z, rnd));   // 보스는 지도의 B 자리
   },
 
   get remaining() {
     return this.list.filter((e) => !e.dead).length;
+  },
+
+  // 살아 있는 보스 (없으면 null)
+  get boss() {
+    return this.list.find((e) => e.boss) || null;
   },
 
   update(dt, player, time) {
@@ -711,8 +877,15 @@ const Enemies = {
         }
       }
     }
+    // 큰 몸(보스)은 전사가 뚫고 지나가지 못하게 밀어냄
+    for (const e of this.list) {
+      if (!e.boss || e.dead) continue;
+      const dx = player.x - e.x, dz = player.z - e.z, d = Math.hypot(dx, dz), min = e.radius + player.radius;
+      if (d < min && d > 0.001) World.moveEntity(player, (dx / d) * (min - d), (dz / d) * (min - d));
+    }
     this.list = this.list.filter((e) => !e.dead || e.deathTimer > 0);
     Arrows.update(dt, player);
+    Boulders.update(dt, player);
   },
 
   // 적 하나에게 피해 + 불똥·숫자. p(전사)를 주면 궁극기 게이지가 참
@@ -724,6 +897,7 @@ const Enemies = {
     Skills.impact(e.x + d.x * e.radius * 0.8, hy, e.z + d.y * e.radius * 0.8, 0.55 + Math.min(1, amount / 40) * 0.6);
     UI.damage(e.x, hy + 0.3, e.z, amount);
     if (p) p.chargeUlt(amount);
+    Sound.play('hit', { power: 0.4 + amount / 40, x: e.x, z: e.z, range: 40 });
     // 타격감: 맞는 순간 아주 짧게 멈칫 + 화면 흔들림 (쓰러뜨리면 조금 더 길게)
     Game.hitStop = Math.max(Game.hitStop, e.dead ? 0.09 : 0.055);
     Camera.shake = Math.max(Camera.shake, e.dead ? 0.22 : 0.12);
@@ -778,7 +952,7 @@ const Enemies = {
   parts(time) {
     const out = [];
     for (const e of this.list) {
-      let root = M4.chain(M4.translation(e.x, e.groundY + e.dy, e.z), M4.rotationY(-e.facing - Math.PI / 2));
+      let root = M4.chain(M4.translation(e.x, e.groundY + e.dy + e.fly, e.z), M4.rotationY(-e.facing - Math.PI / 2));
       let flash = e.flash > 0 ? 0.85 : 0, tint = [1, e.tint[0], e.tint[1], e.tint[2]];
       if (e.dead) {   // 뒤로 넘어간 채(엉덩이 높이를 축으로) 마지막 0.3초 동안 작아지며 사라짐
         const piv = e.hitHeight * 0.9, k = Utils.clamp(e.deathTimer / 0.3, 0, 1), age = DEATH_TIME - e.deathTimer;
@@ -794,17 +968,22 @@ const Enemies = {
           flash = 0.3 + 0.7 * Utils.smooth(age / 0.7);
         }
       }
+      if (e.boss) {
+        Golem.parts(e, M4.chain(M4.translation(e.x, e.groundY, e.z), M4.rotationY(-e.facing - Math.PI / 2)), time, e.flash > 0 ? 0.6 : 0, tint, out);
+        continue;
+      }
       if (e.type === 'slime') {
         const sy = 1 + e.squash + (e.hop > 0 ? 0.12 : 0) + Math.sin(time * 4 + e.seed * 10) * 0.03;
         const sxz = 1 / Math.sqrt(Math.max(0.3, sy));
         out.push({ mesh: 'slime', m: M4.chain(root, M4.translation(0, e.hopY, 0), M4.scaling(sxz, sy, sxz)), flash, tint });
       } else {
-        const { pose, ys } = e.type === 'goblin' ? poseGoblin(e, time) : poseSkeleton(e, time);
-        const rig = e.type === 'goblin' ? GOBLIN_RIG : SKELETON_RIG;
+        const { pose, ys } = e.type === 'goblin' ? poseGoblin(e, time) : e.type === 'bat' ? poseBat(e, time) : poseSkeleton(e, time);
+        const rig = e.type === 'goblin' ? GOBLIN_RIG : e.type === 'bat' ? BAT_RIG : SKELETON_RIG;
         for (const part of rigMatrices(rig, root, pose, ys).out) out.push({ mesh: part.mesh, m: part.m, flash, tint });
       }
     }
     for (const a of Arrows.list) out.push({ mesh: 'arrow', m: Arrows.matrix(a), flash: 0 });
+    for (const b of Boulders.list) out.push({ mesh: 'glRock', m: Boulders.matrix(b), flash: 0 });
     return out;
   },
 };

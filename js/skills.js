@@ -227,6 +227,7 @@ const Skills = {
   },
 
   castWave(p) {
+    Sound.play('wave');
     const fx = Math.cos(p.facing), fz = Math.sin(p.facing);
     this.waves.push({ x: p.x + fx * 0.8, z: p.z + fz * 0.8, y: p.groundY + 1.0, dx: fx, dz: fz, dist: 0, hit: new Set(), age: 0, pal: Weapons.cur });
     Camera.shake = Math.max(Camera.shake, 0.12);
@@ -239,6 +240,7 @@ const Skills = {
 
   castUltimate(p) {
     const w = Weapons.cur;
+    Sound.play('charge');
     this.ult = { t: 0, fired: false, kind: w.id, pal: w };
     Camera.shake = Math.max(Camera.shake, 0.2);
   },
@@ -255,12 +257,14 @@ const Skills = {
     if (w.id === 'laevateinn') Particles.flameBurst(p.x, p.groundY + 0.05, p.z, 18, 0.9, 1.6, 0.35);
     Camera.shake = Math.max(Camera.shake, 0.12);
     this.flash = Math.max(this.flash, 0.12);
+    Sound.play('switch');
   },
 
   // 콤보 마무리 속성 폭발: 내려찍은 자리 주변 적에게 피해 + 빛의 기둥 / 불기둥 / 낙뢰
   burst(x, y, z, p) {
     const w = Weapons.cur, cfg = Weapons.stats;
     this.bursts.push({ x, y, z, age: 0, kind: w.id, pal: w, R: cfg.burstRadius });
+    Sound.play('boom', { size: 0.8 });
     for (const e of Enemies.list) {
       if (e.dead || Math.hypot(e.x - x, e.z - z) > cfg.burstRadius + e.radius) continue;
       Enemies.damage(e, cfg.burst, x, z, p);
@@ -372,6 +376,7 @@ const Skills = {
       }
       if (!u.fired && u.t >= S.ultimate.castTime) {
         u.fired = true;
+        Sound.play('boom', { size: 1.2 });
         this.flash = 1;
         Camera.shake = Math.max(Camera.shake, 0.5);
         const targets = Enemies.list.filter((e) => !e.dead).sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z));
@@ -451,6 +456,7 @@ const Skills = {
       s.age += dt;
       if (s.fired || s.age < S.dash.delay) continue;
       s.fired = true;
+      if (s.targets.length) Sound.play('slash');
       const d = Utils.normalize(s.bx - s.ax, s.bz - s.az);
       for (const e of s.targets) {
         if (e.dead) continue;
@@ -494,6 +500,7 @@ const Skills = {
   strikeHit(s) {
     const pal = s.pal;
     if (!s.e.dead) Enemies.damage(s.e, CONFIG.skills.ultimate.damage, s.x + 0.01, s.z, null, pal.spark);
+    Sound.play('boom', { size: 0.9, x: s.x, z: s.z, range: 60 });
     Particles.sparks(s.x, s.y + 0.5, s.z, 30, pal.spark);
     Particles.dust(s.x, s.y, s.z, 8, 1.4);
     Camera.shake = Math.max(Camera.shake, 0.45);
@@ -525,6 +532,7 @@ const Skills = {
       glowStar(eye, [h.x, h.y, h.z], h.size * (0.5 + 0.7 * grow), 8, 1 - k, h.rot, 0.08 * (1 - 0.6 * k), 0.32 * (0.4 + 0.6 * grow), 0.6, h.pal);
     }
     Glow.top = Glow.data.length;
+    Golem.glow(eye, time);   // 보스 공격 예고 원·충격파 (땅에 그려지므로 다른 물체에 가려짐)
     const showSword = !Camera.isFirst && Character.swordM && !p.dead;
     // 칼날을 따라 가끔 반짝 지나가는 빛 (애니메이션의 칼 번뜩임)
     const gp = (time % 3.2) / 0.45;

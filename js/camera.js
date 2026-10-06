@@ -50,12 +50,12 @@ const Camera = {
     const c = CONFIG.camera;
     const right = [-Math.sin(player.yaw), 0, Math.cos(player.yaw)];
     const pivot = [player.x + right[0] * c.shoulder, player.groundY + c.height, player.z + right[2] * c.shoulder];
-    // 카메라를 뒤로 조금씩 물려 보다가 나무·숲·땅에 막히면 그 앞에서 멈춤
+    // 카메라를 뒤로 조금씩 물려 보다가 나무·숲·땅(동굴에선 천장)에 막히면 그 앞에서 멈춤
     let d = 0;
     while (d < c.distance) {
       const nd = d + 0.1;
       const px = pivot[0] - f[0] * nd, py = pivot[1] - f[1] * nd, pz = pivot[2] - f[2] * nd;
-      if (World.blocked(px, pz, 0.25, true) || py < World.groundHeight(px, pz) + 0.3) break;
+      if (World.blocked(px, pz, 0.25, true) || py < World.groundHeight(px, pz) + 0.3 || py > World.ceilAt(px, pz) - 0.6) break;
       d = nd;
     }
     // 가까워질 땐 바로, 멀어질 땐 천천히 (덜컹거리지 않게)

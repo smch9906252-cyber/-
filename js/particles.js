@@ -21,7 +21,7 @@ const Particles = {
         life: Infinity, size: 0.16, seed: Math.random(), color: BUTTERFLY_COLORS[i % 4], alpha: 1 });
     }
     const cx = (World.cols * CELL) / 2, cz = (World.rows * CELL) / 2;
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < (World.cave ? 0 : 7); i++) {   // 새 (동굴엔 없음)
       this.list.push({ type: FX.BIRD, cx: cx + (Math.random() - 0.5) * 20, cz: cz + (Math.random() - 0.5) * 10,
         angle: Math.random() * 6.28, radius: 18 + Math.random() * 18, height: 32 + Math.random() * 14, speed: 0.1 + Math.random() * 0.06,
         x: 0, y: 0, z: 0, life: Infinity, size: 0.9, seed: Math.random(), color: [0.16, 0.16, 0.2], alpha: 1 });
@@ -111,9 +111,19 @@ const Particles = {
     const step = Math.floor(player.bobPhase / Math.PI);
     if (step !== this.stepIndex) {
       this.stepIndex = step;
-      if (speed > 2) this.dust(player.x, player.groundY, player.z, 2, 0.3);
+      if (speed > 2) {
+        this.dust(player.x, player.groundY, player.z, 2, 0.3);
+        Sound.play('step');
+      }
     }
     if (life && player.isDodging && Math.random() < 0.6) this.dust(player.x, player.groundY, player.z, 1, 0.5);
+
+    // 횃불: 화로에서 불꽃과 불씨가 계속 피어오름 (가까운 것만)
+    for (const [tx, ty, tz] of World.torches) {
+      if (Math.abs(tx - player.x) > 28 || Math.abs(tz - player.z) > 28) continue;
+      if (Math.random() < dt * 22) this.flame(tx + (Math.random() - 0.5) * 0.3, ty, tz + (Math.random() - 0.5) * 0.3, 0.28 + Math.random() * 0.12, FLAME_COLOR, 0.55);
+      if (Math.random() < dt * 3) this.ember(tx, ty + 0.3, tz);
+    }
 
     // 낙엽: 가까운 나무에서 가끔 한 장씩
     this.leafTimer -= dt;

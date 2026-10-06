@@ -20,6 +20,19 @@ const CONFIG = {
     lensFlare: true,     // 해를 볼 때 렌즈 빛 번짐
     reflections: true,   // 연못에 주변이 비침 (느리면 false)
     life: true,          // 나비·새·떨어지는 잎·발걸음 먼지
+    maxPixels: 2.6e6,    // 화면 해상도 상한 (화소 수)
+    maxLights: 12,       // 동굴에서 한 번에 비추는 횃불·수정 빛 수 (1 ~ 12, 적을수록 빠름)
+  },
+
+  // 휴대폰·태블릿(터치 화면만 있는 기기)에서 시작할 때 위 graphics 대신 쓸 값 (그래픽 칩이 약해서 무거운 효과를 줄임)
+  mobileGraphics: {
+    renderScale: 0.8,
+    shadowSize: 1024,
+    grassDensity: 6,
+    ssao: false,
+    reflections: false,
+    maxPixels: 1.1e6,
+    maxLights: 6,
   },
 
   // 카메라 (게임 중 V 키로 1인칭 ↔ 3인칭 전환)
@@ -36,6 +49,7 @@ const CONFIG = {
     moveSpeed: 4.5,      // 걷는 속도
     turnSpeed: 120,      // 방향키(←/→)로 도는 속도 (초당 각도)
     mouseSensitivity: 0.12, // 마우스 감도 (마우스 1픽셀당 각도)
+    touchSensitivity: 0.3,  // 터치 화면에서 손가락으로 끌 때 감도 (1픽셀당 각도)
     eyeHeight: 1.6,      // 눈높이
     radius: 0.35,        // 몸 크기 (나무·바위에 부딪히는 판정)
 
@@ -75,11 +89,19 @@ const CONFIG = {
     slime: { hp: 30, damage: 8, speed: 1.6, detect: 9, radius: 0.5 },
     goblin: { hp: 50, damage: 15, speed: 2.4, chargeSpeed: 10, chargeRange: 7, chargeCooldown: 2.5, detect: 12, radius: 0.45 },
     archer: { hp: 35, damage: 10, speed: 2.0, detect: 18, keepAway: 7, drawTime: 0.9, shootCooldown: 2.4, arrowSpeed: 15, radius: 0.4 },
+    // 박쥐: 머리 위(flyHeight m)를 orbit m 거리로 돌다가 swoopSpeed로 덮침
+    bat: { hp: 20, damage: 8, speed: 4.5, detect: 14, flyHeight: 2.7, orbit: 4.5, swoopSpeed: 11, swoopCooldown: 2.6, radius: 0.4 },
+    // 보스 바위 골렘: slamRange m 안이면 내려찍기(slamWind초 예고, 반경 slamRadius, 그 뒤 stuckTime초 못 움직임),
+    // 멀면 바위 던지기. poise만큼 피해가 쌓이면 staggerTime초 무릎 꿇음. 체력 절반 아래면 분노 (rageSpeed배 빨라짐, 박쥐 rageBats마리)
+    golem: { hp: 650, speed: 1.8, detect: 13, radius: 1.6, slamRange: 4.2, slamWind: 1.05, slamRadius: 3.4, slamDamage: 24, stuckTime: 1.5,
+      slamCooldown: 1.6, throwWind: 1.0, throwRadius: 2.4, throwDamage: 16, throwCooldown: 5, poise: 120, staggerTime: 1.8, rageSpeed: 1.35, rageBats: 2 },
   },
 
   // 구역별 적의 수
   levels: {
     forest1: { slime: 4, goblin: 2, archer: 1 },   // 고요한 숲
     forest2: { slime: 3, goblin: 3, archer: 3 },   // 숲 깊은 곳
+    cave1: { slime: 3, goblin: 2, archer: 2, bat: 5 },   // 수정 동굴
+    cave2: { bat: 2, golem: 1 },                         // 동굴 깊은 곳 (보스)
   },
 };

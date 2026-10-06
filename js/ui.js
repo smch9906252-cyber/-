@@ -3,6 +3,8 @@ const UI = {
   canvas: null,
   g: null,
   s: 1,            // 글자·막대 크기 배율 (화면 크기에 맞춤)
+  sBase: 1,        // 키보드·마우스일 때 배율
+  sTouch: 1,       // 터치 화면일 때 배율 (손가락으로 누르기 좋게 더 큼)
   vignette: null,
 
   init(canvas) {
@@ -13,8 +15,12 @@ const UI = {
   resize(w, h) {
     this.canvas.width = w;
     this.canvas.height = h;
-    this.s = Math.min(w / 1280, h / 720);
+    this.sBase = Math.min(w / 1280, h / 720);
+    const dpr = w / Math.max(1, window.innerWidth), css = Math.min(window.innerWidth, window.innerHeight);
+    this.sTouch = Math.max(this.sBase, dpr * Utils.clamp(css / 400, 0.75, 1.15) * 0.82);   // 휴대폰에서도 글자가 읽히고 버튼이 손가락만 하게
+    this.s = TouchControls.active ? this.sTouch : this.sBase;
     this.vignette = null;
+    TouchControls.layout(w, h, this.sTouch);
   },
 
   font(px) {
@@ -49,6 +55,7 @@ const UI = {
   },
 
   draw(player, levelTime, level) {
+    this.s = TouchControls.active ? this.sTouch : this.sBase;
     const g = this.g, W = this.canvas.width, H = this.canvas.height, s = this.s;
     g.clearRect(0, 0, W, H);
 
@@ -57,14 +64,25 @@ const UI = {
     this.drawUltCutIn();
     this.drawEnemyMarks(player);
     this.drawPopups();
+    this.drawBossBar();
     if (Camera.cine < 0.4) {   // 궁극기 연출 중에는 상태 표시를 숨겨 화면을 넓게
       this.drawExitMarker(player);
-      this.drawMinimap(player);
-      this.drawHealth(player, 92 * s, H - 70 * s);
-      this.drawWeapon(player, 34 * s, H - 150 * s);
-      this.drawSkills(player);
-      const left = Enemies.remaining;
-      this.text(left > 0 ? `남은 적 ${left}` : '출구가 열렸다!', W - 32 * s, 34 * s, 19, left > 0 ? '#ffffff' : '#ffe08a', 'right');
+      const left = Enemies.remaining, leftText = left > 0 ? `남은 적 ${left}` : '출구가 열렸다!', leftColor = left > 0 ? '#ffffff' : '#ffe08a';
+      if (TouchControls.active) {   // 터치: 상태 표시는 위쪽에 모으고 아래는 조이스틱·버튼 자리로
+        const R = 50 * s, mx = 18 * s + R, panelX = mx + R + 16 * s;
+        this.drawMinimap(player, R, mx, mx);
+        this.drawHealth(player, panelX + 58 * s, 52 * s, 190 * s);
+        this.drawWeapon(player, panelX, 92 * s, true);
+        this.drawTouch(player);
+        if (W > H) this.text(leftText, W - (TouchControls.button('fullscreen') ? 160 : 112) * s, 32 * s, 17, leftColor, 'right');
+        else this.text(leftText, W - 16 * s, 76 * s, 17, leftColor, 'right');   // 세로 화면: 위 오른쪽 버튼 아래 (체력 판과 겹치지 않게)
+      } else {
+        this.drawMinimap(player);
+        this.drawHealth(player, 92 * s, H - 70 * s);
+        this.drawWeapon(player, 34 * s, H - 150 * s);
+        this.drawSkills(player);
+        this.text(leftText, W - 32 * s, 34 * s, 19, leftColor, 'right');
+      }
     }
 
     if (Camera.isFirst) {   // 조준점 (1인칭만)
@@ -92,6 +110,7 @@ const UI = {
       g.fillStyle = `rgba(0, 0, 0, ${Game.fade})`;
       g.fillRect(0, 0, W, H);
     }
+    if (TouchControls.active && H > W && !TouchControls.portraitOK) this.drawRotateHint();
   },
 
   // 3D 위치 → 화면 좌표 (카메라 뒤쪽이면 null)
@@ -192,8 +211,8 @@ const UI = {
   drawEnemyMarks(player) {
     const g = this.g, s = this.s;
     for (const e of Enemies.list) {
-      if (e.dead) continue;
-      const sp = this.project(e.x, e.groundY + e.hitHeight * 1.5 + 0.35, e.z);
+      if (e.dead || e.boss) continue;   // 보스는 화면 위 큰 체력 막대로
+      const sp = this.project(e.x, e.groundY + e.markHeight, e.z);
       if (!sp) continue;
       if (e.alert > 0) {
         const pop = 1 + Math.max(0, e.alert - 0.6) * 3;
@@ -209,6 +228,41 @@ const UI = {
         g.fillRect(x, y, w * Utils.clamp(e.hp / e.maxHp, 0, 1), h);
       }
     }
+  },
+
+  // 보스 체력 막대: 깨어난 뒤 화면 위 가운데 (터치 화면은 아래 가운데). 깎인 만큼 하얀 잔상이 천천히 따라 줄어듦
+  drawBossBar() {
+    const b = Enemies.boss;
+    if (!b || b.state === 'sleep' || Camera.cine >= 0.4) return;
+    const g = this.g, s = this.s, W = this.canvas.width, H = this.canvas.height;
+    const fade = b.dead ? Utils.clamp(b.deathTimer / 0.7, 0, 1) : 1;
+    if (fade <= 0) return;
+    const w = Math.min(520 * s, W * (TouchControls.active ? 0.42 : 0.5)), h = 14 * s;
+    const x = W / 2 - w / 2, y = TouchControls.active ? H - 62 * s : 78 * s;
+    g.save();
+    g.globalAlpha = fade;
+    this.panel(x - 12 * s, y - 30 * s, w + 24 * s, h + 42 * s, 10 * s);
+    this.text(b.phase === 2 ? '바위 골렘 · 분노' : '바위 골렘', W / 2, y - 14 * s, 15, b.phase === 2 ? '#ff9a7a' : '#f3e3c3', 'center', fade);
+    g.fillStyle = 'rgba(40, 10, 10, 0.9)';
+    this.roundRect(x, y, w, h, h / 2);
+    g.fill();
+    const lag = Utils.clamp(b.hpLag / b.maxHp, 0, 1), hp = Utils.clamp(b.hp / b.maxHp, 0, 1);
+    g.fillStyle = 'rgba(255, 240, 220, 0.85)';
+    if (lag > 0) {
+      this.roundRect(x, y, Math.max(h, w * lag), h, h / 2);
+      g.fill();
+    }
+    if (hp > 0) {
+      const grad = g.createLinearGradient(0, y, 0, y + h);
+      grad.addColorStop(0, b.phase === 2 ? '#ff9a50' : '#ff7a5a');
+      grad.addColorStop(1, b.phase === 2 ? '#b8300c' : '#a3161a');
+      g.fillStyle = grad;
+      this.roundRect(x, y, Math.max(h, w * hp), h, h / 2);
+      g.fill();
+    }
+    g.fillStyle = 'rgba(255, 255, 255, 0.6)';   // 절반 눈금 (분노하는 지점)
+    g.fillRect(x + w / 2 - 1 * s, y + 2 * s, 2 * s, h - 4 * s);
+    g.restore();
   },
 
   // 피해 숫자: 맞은 자리에서 위로 떠오르며 사라짐 (color를 주면 작은 색 숫자: 불탐·번개 튐)
@@ -320,8 +374,8 @@ const UI = {
   },
 
   // 왼쪽 아래: 하트 + 체력 막대
-  drawHealth(player, x, y) {
-    const g = this.g, s = this.s, w = 290 * s, h = 16 * s;
+  drawHealth(player, x, y, w = 290 * this.s) {
+    const g = this.g, s = this.s, h = 16 * s;
     const ratio = Utils.clamp(player.hp / player.maxHp, 0, 1);
     this.panel(x - 58 * s, y - 34 * s, w + 76 * s, h + 50 * s, 10 * s);
     const beat = ratio < 0.3 ? 1 + Math.max(0, Math.sin(performance.now() / 160)) * 0.15 : 1;
@@ -434,22 +488,26 @@ const UI = {
   },
 
   // 체력 위: 들고 있는 무기 + 무기 칸 3개 (1·2·3 키로 바꿈). 바꾼 직후 속성 색으로 빛남
-  drawWeapon(player, x, y) {
+  // touch: 터치 화면 (칸이 더 크고, 칸이나 판을 눌러 바꿈 → 누를 자리를 TouchControls.weaponHit에 알려 줌)
+  drawWeapon(player, x, y, touch) {
     const g = this.g, s = this.s, w = Weapons.cur;
     const flash = Utils.clamp(1 - Weapons.switchAge / 0.6, 0, 1);
+    const pw = (touch ? 276 : 290) * s, ph = 42 * s;
+    const slot0 = (touch ? 182 : 210) * s, gap = (touch ? 33 : 27) * s, sr = (touch ? 14 : 12) * s;
     g.save();
     if (flash > 0) {
       g.shadowColor = w.ui;
       g.shadowBlur = 22 * s * flash;
     }
-    this.panel(x, y, 290 * s, 42 * s, 8 * s);
+    this.panel(x, y, pw, ph, 8 * s);
     g.restore();
+    if (touch) TouchControls.weaponHit = { x, y, w: pw, h: ph, slots: WEAPONS.map((o, i) => ({ x: x + slot0 + i * gap, y: y + 21 * s, r: sr })) };
     const pop = 1 + flash * 0.35;
     this.weaponIcon(w.id, x + 22 * s, y + 21 * s, s * pop);
     this.text(w.name, x + 44 * s, y + 14 * s, 15, w.ui);
     this.text(`${w.title} · 공격력 ${player.attackPower}`, x + 44 * s, y + 30 * s, 11, '#e8dcc0');
     WEAPONS.forEach((o, i) => {   // 무기 칸: 지금 든 것은 속성 색 테두리
-      const cx = x + 210 * s + i * 27 * s, cy = y + 21 * s, r = 12 * s, on = i === Weapons.index;
+      const cx = x + slot0 + i * gap, cy = y + 21 * s, r = sr, on = i === Weapons.index;
       g.fillStyle = on ? 'rgba(60, 60, 70, 0.9)' : 'rgba(20, 18, 16, 0.75)';
       g.beginPath();
       g.arc(cx, cy, r, 0, Math.PI * 2);
@@ -459,76 +517,191 @@ const UI = {
       g.stroke();
       g.save();
       g.globalAlpha = on ? 1 : 0.45;
-      this.weaponIcon(o.id, cx, cy + 1 * s, s * 0.62);
+      this.weaponIcon(o.id, cx, cy + 1 * s, r * 0.052);
       g.restore();
-      this.text(String(i + 1), cx + r * 0.75, cy + r * 0.8, 10, on ? '#ffffff' : '#a09a90', 'center');
+      if (!touch) this.text(String(i + 1), cx + r * 0.75, cy + r * 0.8, 10, on ? '#ffffff' : '#a09a90', 'center');
     });
   },
 
-  // 오른쪽 아래: 스킬 칸 (Q 회전베기, E 검기, F 섬광 돌진, R 궁극기 — 궁극기 이름·그림은 무기마다)
+  // 스킬 칸 내용 (Q 회전베기, E 검기, F 섬광 돌진, R 궁극기 — 궁극기 이름·그림은 무기마다)
+  skillSlots(player) {
+    const S = CONFIG.skills, wp = Weapons.cur;
+    return {
+      spin: { key: 'Q', name: '회전베기', icon: 'spin', cool: player.cool.spin, max: S.spin.cooldown, r: 28 },
+      wave: { key: 'E', name: '검기', icon: 'wave', cool: player.cool.wave, max: S.wave.cooldown, r: 28 },
+      dash: { key: 'F', name: '섬광 돌진', icon: 'dash', cool: player.cool.dash, max: S.dash.cooldown, r: 28 },
+      ult: { key: 'R', name: wp.ult, icon: wp.ultIcon, charge: player.ult / 100, r: 38 },
+    };
+  },
+
+  // 오른쪽 아래: 스킬 칸 4개를 한 줄로
   drawSkills(player) {
-    const g = this.g, s = this.s, W = this.canvas.width, H = this.canvas.height, S = CONFIG.skills, wp = Weapons.cur;
-    const slots = [
-      { key: 'Q', name: '회전베기', icon: 'spin', cool: player.cool.spin, max: S.spin.cooldown, r: 28 },
-      { key: 'E', name: '검기', icon: 'wave', cool: player.cool.wave, max: S.wave.cooldown, r: 28 },
-      { key: 'F', name: '섬광 돌진', icon: 'dash', cool: player.cool.dash, max: S.dash.cooldown, r: 28 },
-      { key: 'R', name: wp.ult, icon: wp.ultIcon, charge: player.ult / 100, r: 38 },
-    ];
+    const s = this.s, W = this.canvas.width, H = this.canvas.height, all = this.skillSlots(player);
+    const slots = [all.spin, all.wave, all.dash, all.ult];
     let x = W - 64 * s;
     const y = H - 74 * s;
     for (let i = slots.length - 1; i >= 0; i--) {
-      const sl = slots[i], r = sl.r * s;
-      const ready = sl.charge !== undefined ? sl.charge >= 1 : sl.cool <= 0;
-      const now = performance.now() / 1000;
-      g.save();
-      if (ready && sl.charge !== undefined) {   // 궁극기 준비: 무기 속성 색으로 일렁임
-        g.shadowColor = wp.ui;
-        g.shadowBlur = (14 + Math.sin(now * 6) * 6) * s;
-      }
-      const grad = g.createRadialGradient(x, y - r * 0.3, r * 0.1, x, y, r);
-      grad.addColorStop(0, ready ? 'rgba(70, 90, 120, 0.9)' : 'rgba(40, 40, 46, 0.85)');
-      grad.addColorStop(1, 'rgba(12, 12, 16, 0.9)');
-      g.fillStyle = grad;
+      this.skillSlot(slots[i], x, y, slots[i].r * s, true);
+      x -= (slots[i].r + (slots[i - 1] ? slots[i - 1].r : 0) + 22) * s;
+    }
+  },
+
+  // 스킬 칸 하나: 둥근 판 + 그림 + 남은 시간(또는 궁극기 게이지). labels: 키·이름 표시 (터치 버튼은 그림만), pressed: 누르는 중
+  skillSlot(sl, x, y, r, labels, pressed) {
+    const g = this.g, s = this.s, wp = Weapons.cur;
+    const ready = sl.charge !== undefined ? sl.charge >= 1 : sl.cool <= 0;
+    const now = performance.now() / 1000;
+    if (pressed) r *= 0.92;
+    g.save();
+    if (ready && sl.charge !== undefined) {   // 궁극기 준비: 무기 속성 색으로 일렁임
+      g.shadowColor = wp.ui;
+      g.shadowBlur = (14 + Math.sin(now * 6) * 6) * s;
+    }
+    const grad = g.createRadialGradient(x, y - r * 0.3, r * 0.1, x, y, r);
+    grad.addColorStop(0, pressed ? 'rgba(110, 130, 160, 0.95)' : ready ? 'rgba(70, 90, 120, 0.9)' : 'rgba(40, 40, 46, 0.85)');
+    grad.addColorStop(1, 'rgba(12, 12, 16, 0.9)');
+    g.fillStyle = grad;
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+    this.skillIcon(sl.icon, x, y, r * 0.55, ready ? '#ffffff' : 'rgba(255, 255, 255, 0.45)');
+    if (sl.charge !== undefined) {   // 궁극기 게이지 고리
+      g.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      g.lineWidth = 4 * s;
+      g.beginPath();
+      g.arc(x, y, r - 2 * s, 0, Math.PI * 2);
+      g.stroke();
+      g.strokeStyle = ready ? '#ffd56a' : wp.ui;
+      g.beginPath();
+      g.arc(x, y, r - 2 * s, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Utils.clamp(sl.charge, 0, 1));
+      g.stroke();
+      if (!ready) this.text(`${Math.floor(sl.charge * 100)}%`, x, y + r * 0.62, 11, '#cfe3ff', 'center');
+    } else {
+      g.strokeStyle = ready ? 'rgba(232, 196, 120, 0.9)' : 'rgba(150, 140, 120, 0.6)';
+      g.lineWidth = 2 * s;
       g.beginPath();
       g.arc(x, y, r, 0, Math.PI * 2);
-      g.fill();
-      g.restore();
-      this.skillIcon(sl.icon, x, y, r * 0.55, ready ? '#ffffff' : 'rgba(255, 255, 255, 0.45)');
-      if (sl.charge !== undefined) {   // 궁극기 게이지 고리
-        g.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-        g.lineWidth = 4 * s;
+      g.stroke();
+      if (!ready) {   // 남은 시간만큼 어둡게 덮고 숫자
+        g.fillStyle = 'rgba(0, 0, 0, 0.55)';
         g.beginPath();
-        g.arc(x, y, r - 2 * s, 0, Math.PI * 2);
-        g.stroke();
-        g.strokeStyle = ready ? '#ffd56a' : wp.ui;
-        g.beginPath();
-        g.arc(x, y, r - 2 * s, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Utils.clamp(sl.charge, 0, 1));
-        g.stroke();
-        if (!ready) this.text(`${Math.floor(sl.charge * 100)}%`, x, y + r * 0.62, 11, '#cfe3ff', 'center');
-      } else {
-        g.strokeStyle = ready ? 'rgba(232, 196, 120, 0.9)' : 'rgba(150, 140, 120, 0.6)';
-        g.lineWidth = 2 * s;
-        g.beginPath();
-        g.arc(x, y, r, 0, Math.PI * 2);
-        g.stroke();
-        if (!ready) {   // 남은 시간만큼 어둡게 덮고 숫자
-          g.fillStyle = 'rgba(0, 0, 0, 0.55)';
-          g.beginPath();
-          g.moveTo(x, y);
-          g.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (sl.cool / sl.max));
-          g.closePath();
-          g.fill();
-          this.text(String(Math.ceil(sl.cool)), x, y, 18, '#ffffff', 'center');
-        }
+        g.moveTo(x, y);
+        g.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (sl.cool / sl.max));
+        g.closePath();
+        g.fill();
+        this.text(String(Math.ceil(sl.cool)), x, y, 18, '#ffffff', 'center');
       }
-      // 키 표시와 이름
-      g.fillStyle = ready ? '#e8c478' : '#8a8070';
-      this.roundRect(x - 11 * s, y - r - 9 * s, 22 * s, 18 * s, 4 * s);
-      g.fill();
-      this.text(sl.key, x, y - r, 12, '#1a140c', 'center');
-      this.text(sl.name, x, y + r + 13 * s, 12, ready ? '#ffffff' : '#bbbbbb', 'center');
-      x -= (sl.r + (slots[i - 1] ? slots[i - 1].r : 0) + 22) * s;
     }
+    if (!labels) return;
+    // 키 표시와 이름
+    g.fillStyle = ready ? '#e8c478' : '#8a8070';
+    this.roundRect(x - 11 * s, y - r - 9 * s, 22 * s, 18 * s, 4 * s);
+    g.fill();
+    this.text(sl.key, x, y - r, 12, '#1a140c', 'center');
+    this.text(sl.name, x, y + r + 13 * s, 12, ready ? '#ffffff' : '#bbbbbb', 'center');
+  },
+
+  // 터치 화면: 이동 조이스틱 + 공격·구르기·스킬 버튼 + 시점·전체 화면 버튼
+  drawTouch(player) {
+    const g = this.g, s = this.s, T = TouchControls, wp = Weapons.cur;
+    // 조이스틱: 누르고 있으면 손가락 자리에, 아니면 기본 자리에 흐리게
+    const st = T.stick, R = T.stickR;
+    const [ox, oy] = st ? [st.ox, st.oy] : T.stickHome;
+    const kx = st ? ox + Utils.clamp(st.x - ox, -R, R) : ox, ky = st ? oy + Utils.clamp(st.y - oy, -R, R) : oy;
+    g.save();
+    g.globalAlpha = st ? 0.9 : 0.4;
+    g.fillStyle = 'rgba(10, 10, 14, 0.35)';
+    g.strokeStyle = 'rgba(232, 196, 120, 0.8)';
+    g.lineWidth = 2 * s;
+    g.beginPath();
+    g.arc(ox, oy, R, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+    g.fillStyle = 'rgba(232, 196, 120, 0.6)';   // 네 방향 눈금
+    for (let i = 0; i < 4; i++) {
+      const a = (i * Math.PI) / 2, tx = ox + Math.cos(a) * R * 0.8, ty = oy + Math.sin(a) * R * 0.8;
+      g.beginPath();
+      g.moveTo(tx + Math.cos(a) * 6 * s, ty + Math.sin(a) * 6 * s);
+      g.lineTo(tx + Math.cos(a + 2.2) * 5 * s, ty + Math.sin(a + 2.2) * 5 * s);
+      g.lineTo(tx + Math.cos(a - 2.2) * 5 * s, ty + Math.sin(a - 2.2) * 5 * s);
+      g.closePath();
+      g.fill();
+    }
+    const kg = g.createRadialGradient(kx, ky - 6 * s, 2 * s, kx, ky, 26 * s);
+    kg.addColorStop(0, 'rgba(255, 245, 225, 0.95)');
+    kg.addColorStop(1, 'rgba(180, 160, 120, 0.85)');
+    g.fillStyle = kg;
+    g.beginPath();
+    g.arc(kx, ky, 25 * s, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+
+    // 공격 버튼: 들고 있는 무기 그림, 속성 색 테두리
+    const atk = T.button('attack'), down = !!T.held.attack, ar = atk.r * (down ? 0.93 : 1);
+    g.save();
+    g.shadowColor = wp.ui;
+    g.shadowBlur = (down ? 24 : 10) * s;
+    const ag = g.createRadialGradient(atk.x, atk.y - ar * 0.35, ar * 0.1, atk.x, atk.y, ar);
+    ag.addColorStop(0, down ? 'rgba(120, 120, 140, 0.95)' : 'rgba(70, 72, 86, 0.9)');
+    ag.addColorStop(1, 'rgba(14, 14, 18, 0.92)');
+    g.fillStyle = ag;
+    g.beginPath();
+    g.arc(atk.x, atk.y, ar, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+    g.strokeStyle = wp.ui;
+    g.lineWidth = 3 * s;
+    g.beginPath();
+    g.arc(atk.x, atk.y, ar - 1.5 * s, 0, Math.PI * 2);
+    g.stroke();
+    const ik = ar * 0.062;   // 비스듬한 검 그림의 가운데가 버튼 가운데에 오게 (그림의 기준점은 손잡이)
+    this.weaponIcon(wp.id, atk.x + 5.6 * ik, atk.y + 5.7 * ik, ik);
+
+    // 구르기·스킬·궁극기
+    const all = this.skillSlots(player), c = CONFIG.player;
+    const dodge = T.button('dodge');
+    this.skillSlot({ icon: 'roll', cool: player.dodgeCooldown, max: c.dodgeCooldown }, dodge.x, dodge.y, dodge.r, false, !!T.held.dodge);
+    for (const id of ['spin', 'wave', 'dash', 'ult']) {
+      const b = T.button(id);
+      this.skillSlot(all[id], b.x, b.y, b.r, false, !!T.held[id]);
+    }
+
+    // 위 오른쪽 작은 버튼: 시점 전환(눈), 전체 화면
+    for (const id of ['view', 'sound', 'fullscreen']) {
+      const b = T.button(id);
+      if (!b) continue;
+      g.fillStyle = T.held[id] ? 'rgba(90, 90, 110, 0.9)' : 'rgba(14, 14, 18, 0.7)';
+      g.strokeStyle = 'rgba(232, 196, 120, 0.85)';
+      g.lineWidth = 1.5 * s;
+      g.beginPath();
+      g.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      const icon = id === 'view' ? (Camera.isFirst ? 'eye' : 'person') : id === 'sound' ? (Sound.muted ? 'mute' : 'speaker') : 'fullscreen';
+      this.skillIcon(icon, b.x, b.y, b.r * 0.55, '#ffffff');
+    }
+  },
+
+  // 세로로 든 휴대폰: 가로로 돌려 달라는 안내 (누르면 닫힘)
+  drawRotateHint() {
+    const g = this.g, W = this.canvas.width, H = this.canvas.height, s = this.s;
+    g.fillStyle = 'rgba(0, 0, 0, 0.72)';
+    g.fillRect(0, 0, W, H);
+    const cx = W / 2, cy = H * 0.42, t = performance.now() / 1000;
+    const a = -Utils.smooth((t % 2.4) / 1.2) * Math.PI / 2 * (t % 2.4 < 1.8 ? 1 : 0);   // 휴대폰 그림이 옆으로 눕는 움직임
+    g.save();
+    g.translate(cx, cy);
+    g.rotate(a);
+    g.strokeStyle = '#ffe08a';
+    g.lineWidth = 4 * s;
+    this.roundRect(-24 * s, -42 * s, 48 * s, 84 * s, 8 * s);
+    g.stroke();
+    g.fillStyle = '#ffe08a';
+    g.fillRect(-8 * s, 32 * s, 16 * s, 3 * s);
+    g.restore();
+    this.text('휴대폰을 가로로 돌려 주세요', cx, cy + 86 * s, 22, '#ffffff', 'center');
+    this.text('화면을 누르면 이대로 할 수 있어요', cx, cy + 118 * s, 14, '#ffe7a8', 'center', 0.85);
   },
 
   // 스킬 그림
@@ -590,6 +763,75 @@ const UI = {
         g.lineTo(x + r * (ox - l * 0.7), y + r * (oy - l * 0.7));
         g.stroke();
       }
+    } else if (kind === 'roll') {   // 구르기: 둥글게 감기는 화살표 + 바람 줄
+      g.beginPath();
+      g.arc(x + r * 0.1, y, r * 0.62, Math.PI * 0.85, Math.PI * 2.25);
+      g.stroke();
+      const ea = Math.PI * 2.25, ex = x + r * 0.1 + Math.cos(ea) * r * 0.62, ey = y + Math.sin(ea) * r * 0.62;
+      g.beginPath();
+      g.moveTo(ex + r * 0.3, ey - r * 0.12);
+      g.lineTo(ex - r * 0.2, ey + r * 0.32);
+      g.lineTo(ex - r * 0.22, ey - r * 0.3);
+      g.closePath();
+      g.fill();
+      for (const dy of [-0.3, 0.1]) {
+        g.beginPath();
+        g.moveTo(x - r * 0.75, y + dy * r);
+        g.lineTo(x - r * 1.05, y + dy * r);
+        g.stroke();
+      }
+    } else if (kind === 'eye') {   // 눈 (지금 1인칭)
+      g.lineWidth = 2.5 * s;
+      g.beginPath();
+      g.moveTo(x - r, y);
+      g.quadraticCurveTo(x, y - r * 0.95, x + r, y);
+      g.quadraticCurveTo(x, y + r * 0.95, x - r, y);
+      g.stroke();
+      g.beginPath();
+      g.arc(x, y, r * 0.32, 0, Math.PI * 2);
+      g.fill();
+    } else if (kind === 'person') {   // 사람 (지금 3인칭)
+      g.beginPath();
+      g.arc(x, y - r * 0.45, r * 0.32, 0, Math.PI * 2);
+      g.fill();
+      g.beginPath();
+      g.moveTo(x - r * 0.62, y + r * 0.85);
+      g.quadraticCurveTo(x - r * 0.6, y - r * 0.05, x, y - r * 0.05);
+      g.quadraticCurveTo(x + r * 0.6, y - r * 0.05, x + r * 0.62, y + r * 0.85);
+      g.closePath();
+      g.fill();
+    } else if (kind === 'speaker' || kind === 'mute') {   // 스피커 (끄면 X)
+      g.beginPath();
+      g.moveTo(x - r * 0.85, y - r * 0.3);
+      g.lineTo(x - r * 0.4, y - r * 0.3);
+      g.lineTo(x + r * 0.1, y - r * 0.8);
+      g.lineTo(x + r * 0.1, y + r * 0.8);
+      g.lineTo(x - r * 0.4, y + r * 0.3);
+      g.lineTo(x - r * 0.85, y + r * 0.3);
+      g.closePath();
+      g.fill();
+      g.lineWidth = 2.2 * s;
+      if (kind === 'speaker') {
+        for (const k of [0.45, 0.8]) {
+          g.beginPath();
+          g.arc(x + r * 0.1, y, r * k, -0.8, 0.8);
+          g.stroke();
+        }
+      } else {
+        g.beginPath();
+        g.moveTo(x + r * 0.35, y - r * 0.35); g.lineTo(x + r * 0.95, y + r * 0.35);
+        g.moveTo(x + r * 0.95, y - r * 0.35); g.lineTo(x + r * 0.35, y + r * 0.35);
+        g.stroke();
+      }
+    } else if (kind === 'fullscreen') {   // 네 귀퉁이 꺾쇠
+      g.lineWidth = 2.5 * s;
+      for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        g.beginPath();
+        g.moveTo(x + sx * r * 0.85, y + sy * r * 0.3);
+        g.lineTo(x + sx * r * 0.85, y + sy * r * 0.85);
+        g.lineTo(x + sx * r * 0.3, y + sy * r * 0.85);
+        g.stroke();
+      }
     } else {   // 번개
       g.beginPath();
       g.moveTo(x + r * 0.25, y - r);
@@ -609,15 +851,19 @@ const UI = {
     const ppm = 4;   // 1m당 픽셀
     const c = Utils.makeCanvas(World.cols * CELL * ppm, World.rows * CELL * ppm);
     const g = c.getContext('2d');
-    const colors = { '#': '#1f3a22', '.': '#5c8a3e', 'P': '#5c8a3e', 'f': '#6f9a48', ':': '#a88a5a', '~': '#3f86b8', 'E': '#8a8a8a',
-      'T': '#5c8a3e', 'R': '#5c8a3e', 'b': '#5c8a3e', 'X': '#5c8a3e' };
+    // 칸 색 (동굴은 바위색 바닥, 벽은 짙은 갈색)
+    const colors = World.cave
+      ? { '#': '#221e1b', ':': '#8a7a5e', '~': '#2f7f9a', 'E': '#8a8a8a', 'o': '#b8ac88' }
+      : { '#': '#1f3a22', 'f': '#6f9a48', ':': '#a88a5a', '~': '#3f86b8', 'E': '#8a8a8a' };
+    const floor = World.cave ? '#5e574f' : '#5c8a3e';
+    const dots = World.cave ? { C: '#7fe8ff', t: '#ffb040', S: '#a49d94', R: '#8d9096', X: '#a8a49a' } : { T: '#2c5a2c', R: '#8d9096', b: '#2f6a2a', X: '#a8a49a' };
     const k = CELL * ppm;
     for (let z = 0; z < World.rows; z++) {
       for (let x = 0; x < World.cols; x++) {
         const ch = World.data[z][x];
-        g.fillStyle = colors[ch] || '#5c8a3e';
+        g.fillStyle = colors[ch] || floor;
         g.fillRect(x * k, z * k, k + 0.5, k + 0.5);
-        const dot = { T: '#2c5a2c', R: '#8d9096', b: '#2f6a2a', X: '#a8a49a' }[ch];
+        const dot = dots[ch];
         if (dot) {
           g.fillStyle = dot;
           g.beginPath();
@@ -630,9 +876,9 @@ const UI = {
   },
 
   // 왼쪽 위: 둥근 미니맵 (내가 보는 쪽이 위). 빨간 점 = 적, 금색 = 열린 출구
-  drawMinimap(player) {
+  drawMinimap(player, R = 74 * this.s, cx = 30 * this.s + R, cy = cx) {
     if (!this.mini) return;
-    const g = this.g, s = this.s, R = 74 * s, cx = 30 * s + R, cy = 30 * s + R;
+    const g = this.g, s = this.s;
     const scale = (3 * s) / this.mini.ppm;   // 화면에서 1m = 3px
     g.save();
     g.beginPath();
@@ -653,7 +899,7 @@ const UI = {
       g.arc((x - player.x) * ppm, (z - player.z) * ppm, r / scale, 0, Math.PI * 2);
       g.fill();
     };
-    for (const e of Enemies.list) if (!e.dead) dot(e.x, e.z, 4 * s, '#ff4a3a');
+    for (const e of Enemies.list) if (!e.dead) dot(e.x, e.z, (e.boss ? 8 : 4) * s, e.boss ? '#ff8a3a' : '#ff4a3a');
     if (World.gate) dot(World.gate.x, World.gate.z, 6 * s, World.gateOpen ? '#ffd56a' : '#6fd8ff');
     g.restore();
     // 테두리와 가운데 화살표(나)
@@ -711,16 +957,25 @@ const UI = {
     const g = this.g, W = this.canvas.width, H = this.canvas.height, s = this.s;
     const a = Utils.clamp((20 - t) / 2, 0, 1);
     if (a > 0) {
-      const items = [['WASD', '이동'], ['마우스', '시점'], ['클릭', '공격'], ['Shift', '구르기'], ['Q', '회전베기'], ['E', '검기'], ['F', '돌진'], ['R', '궁극기'], ['1·2·3', '무기'], ['V', '1·3인칭']];
-      const total = items.reduce((sum, [k, l]) => sum + this.keyHint(k, l, 0, 0, true), 0);
-      let x = W / 2 - total / 2;
+      const items = TouchControls.active
+        ? [['왼쪽 화면', '이동'], ['오른쪽 끌기', '시점'], ['공격 꾹', '연속 공격'], ['무기 판', '무기 바꾸기']]
+        : [['WASD', '이동'], ['마우스', '시점'], ['클릭', '공격'], ['Shift', '구르기'], ['Q', '회전베기'], ['E', '검기'], ['F', '돌진'], ['R', '궁극기'], ['1·2·3', '무기'], ['V', '1·3인칭'], ['M', '소리']];
+      // 화면보다 길면 두 줄로 나눔 (세로로 든 휴대폰)
+      const width = (list) => list.reduce((sum, [k, l]) => sum + this.keyHint(k, l, 0, 0, true), 0);
+      const rows = width(items) > W - 30 * s ? [items.slice(0, Math.ceil(items.length / 2)), items.slice(Math.ceil(items.length / 2))] : [items];
       g.save();
       g.globalAlpha = a;
-      this.panel(x - 14 * s, 26 * s - 17 * s, total + 10 * s, 34 * s, 17 * s);   // 밝은 하늘 위에서도 잘 보이게 어두운 바탕
-      for (const [k, l] of items) x += this.keyHint(k, l, x, 26 * s);   // 화면 맨 위 가운데 (용사·체력 막대를 가리지 않게)
+      rows.forEach((row, i) => {
+        const total = width(row);
+        let x = W / 2 - total / 2;
+        // 키보드: 화면 맨 위 가운데 (용사·체력 막대를 가리지 않게), 터치: 아래 가운데 (조이스틱과 버튼 사이, 두 줄이면 위로 쌓음)
+        const y = TouchControls.active ? H - 24 * s - (rows.length - 1 - i) * 40 * s : 26 * s + i * 40 * s;
+        this.panel(x - 14 * s, y - 17 * s, total + 10 * s, 34 * s, 17 * s);   // 밝은 하늘 위에서도 잘 보이게 어두운 바탕
+        for (const [k, l] of row) x += this.keyHint(k, l, x, y);
+      });
       g.restore();
     }
-    if (!Input.locked && Camera.cine < 0.4) {   // 마우스 잠금 안내 (알약 모양)
+    if (!Input.locked && !TouchControls.active && Camera.cine < 0.4) {   // 마우스 잠금 안내 (알약 모양)
       const msg = Input.lockFailed ? '오른쪽 버튼을 누른 채 끌면 둘러볼 수 있어요  ·  왼쪽 클릭 = 공격' : '화면을 클릭하면 마우스로 둘러볼 수 있어요  (Esc로 해제)';
       g.font = this.font(15);
       const w = g.measureText(msg).width + 40 * s;

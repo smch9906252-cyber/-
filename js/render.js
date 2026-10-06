@@ -30,6 +30,26 @@ const LIGHTING = {
     particleColor: [0.8, 1.0, 0.35],            // 반딧불 (연둣빛)
     grade: [1.1, 0.86, 0.84],                   // 화면 전체를 주홍빛 저녁 색으로
   },
+  // 수정 동굴: 천장 구멍으로만 햇빛이 들고, 나머지는 횃불·수정 빛. 어둡고 푸른 공기
+  cave: {
+    sunDir: V3.normalize([0.28, 1, 0.16]),      // 거의 머리 위 (천장 구멍 → 바닥으로 비스듬히)
+    sunColor: [2.1, 1.95, 1.6],
+    skyColor: [0.13, 0.15, 0.24],               // 그늘의 은은한 빛 (바위에 반사된 푸른 기운)
+    groundColor: [0.05, 0.045, 0.04],
+    fogColor: [0.03, 0.038, 0.06],
+    fogScale: 2.3,                              // 안개를 숲보다 훨씬 짙게 (멀리는 어둠에 잠김)
+    zenith: [1.5, 1.7, 2.0],                    // 구멍 너머로 보이는 하늘 (밖은 눈부신 한낮)
+    cloudLit: [1.3, 1.24, 1.15],
+    cloudShade: [0.58, 0.64, 0.78],
+    rays: 0,                                    // 화면 빛줄기 대신 구멍마다 빛기둥을 그림
+    particles: true,
+    particleColor: [0.5, 0.65, 0.85],           // 떠다니는 먼지 (푸르스름)
+    shaftColor: [1.0, 0.92, 0.7],               // 천장 구멍 빛기둥 색
+    grade: [0.92, 0.98, 1.1],                   // 화면 전체를 서늘하게
+    shadowOutside: 0,                           // 그림자 지도 바깥 = 천장에 가린 어둠
+    clouds: false,
+    celAmbient: 0.4,                            // 캐릭터 그늘도 어둡게
+  },
 };
 
 const IDENTITY = M4.identity();
@@ -81,6 +101,8 @@ const Renderer = {
   particles: null,
   partMesh: {},    // 관절로 움직이는 몸 부분 모델 (기사·적·화살)
   partBox: {},     // 부분별 크기 (외곽선 두께 맞추기용)
+  lights: { pos: new Float32Array(48), col: new Float32Array(36), count: 0 },   // 이번 화면의 점 빛 (gatherLights)
+  fog: 0.013,      // 이번 화면의 안개 짙기 (테마별 배율 적용)
   vp: null,        // 마지막 화면의 '투영 x 카메라' 행렬 (글자를 3D 위치에 띄울 때 사용)
 
   init() {
@@ -110,7 +132,7 @@ const Renderer = {
   // 그림자 지도 두 장: 넓은 것(멀리까지) + 촘촘한 것(전사 주변만, 그림자가 또렷함)
   initShadow() {
     this.shadow = this.makeShadow(CONFIG.graphics.shadowSize);
-    this.shadowNear = this.makeShadow(2048);
+    this.shadowNear = this.makeShadow(Math.min(2048, CONFIG.graphics.shadowSize));
   },
 
   // 그림자 지도: 해 쪽에서 본 '가장 가까운 물체까지 거리'를 그리는 그림
@@ -237,6 +259,8 @@ const Renderer = {
     const gl = GL.gl;
     const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
     const L = LIGHTING[World.level.theme];
+    this.fog = CONFIG.graphics.fogDensity * (L.fogScale || 1);
+    this.gatherLights(player, time);
     const eye = Camera.eye;
     const near = 0.05, far = 1000;
     const proj = M4.perspective(Utils.rad(CONFIG.graphics.fov + player.fovKick), W / H, near, far);
@@ -271,6 +295,7 @@ const Renderer = {
     if (!Camera.isFirst && Character.ghosts.length) this.drawGhosts(proj, view, eye, time);
     if (World.water) this.drawWater(proj, view, lightVP, eye, L, time);
     if (World.gate) this.drawGateFX(proj, view, eye, time);
+    if (World.shafts) this.drawShafts(proj, view, eye, L, time);
     this.drawFX(proj, view, time, H);
     Skills.buildGlow(eye, time, player);
     this.drawGlow(proj, view);
@@ -374,6 +399,34 @@ const Renderer = {
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.shadowNear.tex);
     gl.uniform1i(u.uShadowNear, 2);
+    const L = LIGHTING[World.level.theme];
+    gl.uniform1f(u.uShadowOutside, L.shadowOutside ?? 1);
+    gl.uniform1f(u.uClouds, L.clouds === false ? 0 : 1);
+  },
+
+  // 이번 화면에 쓸 점 빛 (가까운 것부터 12개): 횃불은 일렁이고, 동굴에선 들고 있는 검도 속성 색으로 주변을 비춤
+  gatherLights(player, time) {
+    const near = [];
+    for (const l of World.lights) {
+      const d = Math.hypot(l.x - player.x, l.z - player.z);
+      if (d < l.r + 30) near.push([d, l]);
+    }
+    near.sort((a, b) => a[0] - b[0]);
+    const max = Utils.clamp(CONFIG.graphics.maxLights | 0, 1, 12);
+    const list = near.slice(0, World.cave ? max - 1 : max).map(([, l]) => {
+      const k = l.flicker ? 0.82 + 0.1 * Math.sin(time * 11 + l.flicker) + 0.08 * Math.sin(time * 23.7 + l.flicker * 3) : 1;
+      return { x: l.x, y: l.y, z: l.z, r: l.r, color: l.color.map((v) => v * k) };
+    });
+    if (World.cave && !player.dead) {
+      const tip = !Camera.isFirst && Character.swordM ? M4.transformPoint(Character.swordM, [0, Weapons.cur.length * 0.6, 0]) : V3.add(player.eye(), V3.scale(player.forward(), 0.6));
+      list.push({ x: tip[0], y: tip[1], z: tip[2], r: 4.5, color: Weapons.cur.spark.map((v) => v * 0.55) });
+    }
+    const pos = new Float32Array(48), col = new Float32Array(36);
+    list.forEach((l, i) => {
+      pos.set([l.x, l.y, l.z, l.r], i * 4);
+      col.set(l.color, i * 3);
+    });
+    this.lights = { pos, col, count: list.length };
   },
 
   // 3D 모델용 셰이더 준비 (빛·안개·그림자 값 넘기기)
@@ -391,7 +444,7 @@ const Renderer = {
     gl.uniform3fv(u.uFogColor, L.fogColor);
     gl.uniform3fv(u.uCamPos, eye);
     gl.uniform3fv(u.uPlayerPos, [player.x, player.groundY + 1.1, player.z]);   // (풀은 x·z만 씀)
-    gl.uniform1f(u.uFogDensity, CONFIG.graphics.fogDensity);
+    gl.uniform1f(u.uFogDensity, this.fog);
     gl.uniform1f(u.uShadowOn, CONFIG.graphics.shadows ? 1 : 0);
     gl.uniform1f(u.uTime, time);
     gl.uniform1f(u.uGroundDetail, 0);
@@ -409,6 +462,10 @@ const Renderer = {
     gl.uniform1f(u.uDim, Skills.dim);
     gl.uniform3fv(u.uDimTint, (Skills.ult ? Skills.ult.pal : Weapons.cur).dark);
     gl.uniform1f(u.uWaterLevel, World.waterLevel === null ? -100 : World.waterLevel);
+    gl.uniform1f(u.uCelAmbient, L.celAmbient ?? 1);
+    gl.uniform4fv(u.uLights, this.lights.pos);
+    gl.uniform3fv(u.uLightColors, this.lights.col);
+    gl.uniform1i(u.uLightCount, this.lights.count);
     gl.uniform1f(u.uMistBase, World.waterLevel === null ? -0.8 : World.waterLevel);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.leafTex);
@@ -427,7 +484,7 @@ const Renderer = {
       gl.uniform1f(u.uAOHeight, m.ao || 0);
       gl.uniform1f(u.uGrass, m.grass ? 1 : 0);
       gl.uniform1f(u.uRim, m.rim || 0);
-      gl.uniform1f(u.uFogDensity, m.fog || CONFIG.graphics.fogDensity);
+      gl.uniform1f(u.uFogDensity, m.fog || this.fog);
       gl.uniform1f(u.uCamFade, !Camera.isFirst && !m.ground ? 1 : 0);
       GL.drawMesh(m.mesh, test);
     }
@@ -436,7 +493,7 @@ const Renderer = {
     gl.uniform1f(u.uGroundDetail, 0);
     gl.uniform1f(u.uAOHeight, 0);
     gl.uniform1f(u.uGrass, 0);
-    gl.uniform1f(u.uFogDensity, CONFIG.graphics.fogDensity);
+    gl.uniform1f(u.uFogDensity, this.fog);
     return u;
   },
 
@@ -546,13 +603,13 @@ const Renderer = {
       gl.uniform1f(u.uGroundDetail, m.ground ? 1 : 0);
       gl.uniform1f(u.uAOHeight, m.ao || 0);
       gl.uniform1f(u.uRim, m.rim || 0);
-      gl.uniform1f(u.uFogDensity, m.fog || CONFIG.graphics.fogDensity);
+      gl.uniform1f(u.uFogDensity, m.fog || this.fog);
       GL.drawMesh(m.mesh, test);
     }
     gl.enable(gl.CULL_FACE);
     gl.uniform1f(u.uGroundDetail, 0);
     gl.uniform1f(u.uAOHeight, 0);
-    gl.uniform1f(u.uFogDensity, CONFIG.graphics.fogDensity);
+    gl.uniform1f(u.uFogDensity, this.fog);
     this.drawParts(u, parts, proj, rview, time);
     gl.uniform1f(u.uClipY, -1000);
     gl.frontFace(gl.CCW);
@@ -586,6 +643,29 @@ const Renderer = {
     gl.disable(gl.BLEND);
   },
 
+  // 동굴 천장 구멍으로 쏟아지는 빛기둥 (빛을 더함)
+  drawShafts(proj, view, eye, L, time) {
+    const gl = GL.gl, P = this.p.barrier;
+    gl.useProgram(P.prog);
+    gl.uniformMatrix4fv(P.u.uProj, false, proj);
+    gl.uniformMatrix4fv(P.u.uView, false, view);
+    gl.uniform1f(P.u.uTime, time);
+    gl.uniform3fv(P.u.uCamPos, eye);
+    gl.uniform1f(P.u.uMode, 2);
+    gl.uniform1f(P.u.uAmount, 1 - Skills.dim * 0.7);
+    gl.uniform1f(P.u.uBaseY, -1);
+    gl.uniform1f(P.u.uHeight, 10);
+    gl.uniform3fv(P.u.uColor, L.shaftColor);
+    gl.enable(gl.BLEND);
+    gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ZERO, gl.ONE);
+    gl.disable(gl.CULL_FACE);
+    gl.depthMask(false);
+    GL.drawMesh(World.shafts);
+    gl.depthMask(true);
+    gl.enable(gl.CULL_FACE);
+    gl.disable(gl.BLEND);
+  },
+
   // 연못 물 (반투명, 뒤에 있는 물속 땅이 비쳐 보임)
   drawWater(proj, view, lightVP, eye, L, time) {
     const gl = GL.gl, P = this.p.water, u = P.u;
@@ -598,7 +678,7 @@ const Renderer = {
     gl.uniform3fv(u.uSunColor, L.sunColor);
     gl.uniform3fv(u.uFogColor, L.fogColor);
     gl.uniform3fv(u.uZenith, L.zenith);
-    gl.uniform1f(u.uFogDensity, CONFIG.graphics.fogDensity);
+    gl.uniform1f(u.uFogDensity, this.fog);
     gl.uniform1f(u.uTime, time);
     gl.activeTexture(gl.TEXTURE3);   // 물에 비친 모습
     gl.bindTexture(gl.TEXTURE_2D, Post.refl.tex);
@@ -626,7 +706,7 @@ const Renderer = {
     gl.uniform1f(P.u.uTime, time);
     gl.uniform1f(P.u.uScale, (H * proj[5]) / 2);
     const L = LIGHTING[World.level.theme];
-    gl.uniform3fv(P.u.uColor, World.level.theme === 'dusk' ? L.particleColor.map((v) => v * 1.6) : L.particleColor);
+    gl.uniform3fv(P.u.uColor, World.level.theme === 'dusk' ? L.particleColor.map((v) => v * 1.6) : L.particleColor);   // 반딧불은 더 밝게
     gl.enable(gl.BLEND);
     gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ZERO, gl.ONE);   // 빛나는 느낌 (색을 더함, 하늘 표시는 그대로)
     gl.depthMask(false);

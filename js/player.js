@@ -63,6 +63,7 @@ class Player {
     this.combo = 0;          // 지금 콤보 동작 (0 베기, 1 되베기, 2 내려찍기)
     this.comboTimer = 0;     // 0보다 크면 다음 공격이 콤보로 이어짐
     this.impactDone = false; // 내려찍기가 땅에 닿았는지
+    this.aimYaw = yaw;       // 이번 칼질의 방향 (터치 조준 보조)
   }
 
   get isAttacking() { return this.attackTimer > 0; }
@@ -92,6 +93,7 @@ class Player {
     this.attackTimer = 0;
     this.trail = [];
     if (this.hp <= 0) this.dead = true;
+    Sound.play('hurt');
     return true;
   }
 
@@ -144,6 +146,9 @@ class Player {
     if (Input.isDown('KeyS', 'ArrowDown')) fwd -= 1;
     if (Input.isDown('KeyD')) side += 1;
     if (Input.isDown('KeyA')) side -= 1;
+    fwd += Input.stickY;   // 터치 조이스틱 (조금만 기울이면 천천히 걸음)
+    side += Input.stickX;
+    const amount = Math.min(1, Math.hypot(fwd, side));
     const cos = Math.cos(this.yaw), sin = Math.sin(this.yaw);
     const dir = Utils.normalize(cos * fwd - sin * side, sin * fwd + cos * side);
 
@@ -189,13 +194,14 @@ class Player {
     // 스킬: R 궁극기, Q 회전베기, E 검기, F 섬광 돌진
     if (Input.wasPressed('KeyF') && this.cool.dash <= 0 && !this.isDodging) {
       this.cool.dash = S.dash.cooldown;
-      if (!Camera.isFirst) this.facing = this.yaw;
+      if (!Camera.isFirst) this.facing = TouchControls.aim(this, S.dash.distance + 1, 30) ?? this.yaw;
       this.dashTimer = S.dash.time;
       this.dashFrom = { x: this.x, z: this.z, y: this.groundY };
       this.dashHit = new Set();
       this.attackTimer = this.spinTimer = 0;
       this.trail = [];
       Particles.dust(this.x, this.groundY, this.z, 8, 0.6);   // 땅을 박차는 흙먼지
+      Sound.play('dash');
       Camera.shake = Math.max(Camera.shake, 0.15);
       return;
     }
@@ -211,6 +217,7 @@ class Player {
       this.cool.spin = S.spin.cooldown;
       this.spinTimer = S.spin.time;
       this.spinId++;
+      Sound.play('spin');
       this.attackTimer = 0;
       for (let i = 0; i < 12; i++) {   // 발밑에서 둥글게 일어나는 흙먼지
         const a = (i / 12) * Math.PI * 2;
@@ -219,7 +226,8 @@ class Player {
     }
     if (Input.wasPressed('KeyE') && this.cool.wave <= 0 && !this.isDodging) {
       this.cool.wave = S.wave.cooldown;
-      if (!Camera.isFirst) this.facing = this.yaw;
+      if (!Camera.isFirst) this.facing = TouchControls.aim(this, S.wave.range * 0.8, 30) ?? this.yaw;
+      this.aimYaw = this.facing;
       Skills.castWave(this);
       this.attackTimer = c.attackTime;   // 검을 휘두르는 동작과 함께
       this.attackCooldown = c.attackCooldown;
@@ -230,6 +238,7 @@ class Player {
     if (this.spinTimer > 0) Enemies.hitRadius(this, S.spin.radius, S.spin.damage, this.spinId);
 
     if (Input.wasPressed('Space', 'Mouse0')) this.attackBuffer = 0.3;   // 휘두르는 중에 미리 눌러도 다음 콤보로 이어짐
+    if (Input.isDown('TouchAttack')) this.attackBuffer = 0.3;            // 터치: 공격 버튼을 누르고 있으면 콤보가 계속 이어짐
 
     // 회피 시작 (Shift): 누르고 있는 방향으로, 방향키를 안 누르면 뒤로
     if (Input.wasPressed('ShiftLeft', 'ShiftRight') && this.dodgeCooldown <= 0 && !this.isDodging) {
@@ -238,6 +247,7 @@ class Player {
       this.dodgeCooldown = c.dodgeCooldown;
       this.attackTimer = 0;
       this.trail = [];
+      Sound.play('dodge');
     }
 
     // 공격 시작 (클릭 또는 스페이스)
@@ -249,7 +259,9 @@ class Player {
       this.combo = this.comboTimer > 0 ? (this.combo + 1) % 3 : 0;   // 이어서 누르면 다음 콤보 동작
       this.comboTimer = c.attackCooldown + c.comboWindow;
       this.impactDone = false;
-      if (!Camera.isFirst) this.facing = this.yaw;   // 3인칭: 카메라가 보는 쪽으로 바로 돌아서서 벰
+      Sound.play('swing', { heavy: this.combo === 2 });
+      if (!Camera.isFirst) this.facing = TouchControls.aim(this, Weapons.stats.range + 2, 100) ?? this.yaw;   // 3인칭: 카메라가 보는 쪽으로 바로 돌아서서 벰 (터치는 가까운 적 쪽)
+      this.aimYaw = this.facing;
       const step = this.combo === 2 ? 7 : 4;          // 벨 때 한 걸음 내디딤 (내려찍기는 크게)
       this.vx += Math.cos(this.facing) * step;
       this.vz += Math.sin(this.facing) * step;
@@ -277,8 +289,8 @@ class Player {
     } else {
       const spd = c.moveSpeed * (this.isAttacking ? 0.5 : this.spinTimer > 0 ? 0.6 : 1);
       const a = Math.min(1, dt * 12);
-      this.vx += (dir.x * spd - this.vx) * a;
-      this.vz += (dir.y * spd - this.vz) * a;
+      this.vx += (dir.x * spd * amount - this.vx) * a;
+      this.vz += (dir.y * spd * amount - this.vz) * a;
     }
     World.moveEntity(this, this.vx * dt, this.vz * dt);
     this.groundY += (World.groundHeight(this.x, this.z) - this.groundY) * Math.min(1, dt * 12);
@@ -305,7 +317,7 @@ class Player {
     } else {
       let target = null;
       if (this.isDodging) target = Math.atan2(this.dodgeDir.y, this.dodgeDir.x);
-      else if (this.isAttacking) target = this.yaw;
+      else if (this.isAttacking) target = TouchControls.active ? this.aimYaw : this.yaw;   // 터치는 조준 보조로 정한 쪽을 유지
       else if (fwd || side) target = Math.atan2(dir.y, dir.x);
       if (target !== null) {
         const diff = Math.atan2(Math.sin(target - this.facing), Math.cos(target - this.facing));

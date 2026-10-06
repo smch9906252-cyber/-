@@ -8,6 +8,8 @@ const Input = {
   locked: false,// 마우스가 게임 화면에 고정되어 있는지
   lockFailed: false, // 마우스 고정이 막힌 환경(일부 앱·웹 창 안): 오른쪽 버튼을 누른 채 끌어서 둘러봄
   dragging: false,
+  stickX: 0,    // 터치 조이스틱 기울기 (-1 ~ 1, 오른쪽 +) — touch.js가 채움
+  stickY: 0,    // (-1 ~ 1, 앞 +)
 
   init(canvas) {
     const blockKeys = ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
