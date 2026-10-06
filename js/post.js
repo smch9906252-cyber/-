@@ -162,7 +162,7 @@ const Post = {
 
     // 빛줄기 (해가 화면 쪽에 있을 때만)
     const rays = opts.rayStrength > 0.01;
-    if (rays) this.pass(this.p.rays, this.rays, { uScene: this.scene.tex }, { uSun: opts.sunUV });
+    if (rays) this.pass(this.p.rays, this.rays, { uScene: this.scene.tex }, { uSun: opts.sunUV, uCloudRays: opts.cloudRays || 0 });
 
     // 주변 가림 (반 크기로 계산 → 가로·세로로 흐리게)
     const ssao = CONFIG.graphics.ssao;

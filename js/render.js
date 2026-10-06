@@ -73,6 +73,7 @@ const LIGHTING = {
     cel: { soft: 0.07, sky: 0.35, sheer: 0.5 }, // 캐릭터: 그늘은 보랏빛 하늘을 띠고, 해를 향해 걸으면 망토가 노을빛으로 비침
     // 야숨풍으로 조금 부드럽게 (노을빛은 그대로 두고, 금빛 풀이 새빨갛게 타지 않게·역광 그늘이 새까맣지 않게)
     gold: 0.4,                                  // 금빛 마른 풀밭 양 (숲의 0.4배)
+    cloudRays: 1,                               // 해가 산 너머에 걸려 있어 볕 받은 구름에서도 빛줄기가 나옴
     terminator: 0.32,                           // 명암 경계를 조금 부드럽게
     shadeDesat: 0.25,                           // 그늘 색을 조금 빼서 차분하게
     saturation: 1.06,                           // 화면 채도 (기본 1.22)
@@ -370,7 +371,7 @@ const Renderer = {
     Post.end({ sunUV: [(cx / cw) * 0.5 + 0.5, (cy / cw) * 0.5 + 0.5], rayStrength: rayStrength * (1 - Skills.darken), rayColor: V3.scale(L.sunColor, 0.18), proj, near, far,
       flash: Skills.flash, flashColor: pal.flash, grade: L.grade,
       sat: L.saturation, contrast: L.contrast, split: L.split, lift: L.lift, ao: L.aoStrength,
-      curve: L.curve, shadeTint: L.shadeTint, highTint: L.highTint, skyKeep: L.skyKeep, darkDesat: L.darkDesat,
+      cloudRays: L.cloudRays, curve: L.curve, shadeTint: L.shadeTint, highTint: L.highTint, skyKeep: L.skyKeep, darkDesat: L.darkDesat,
       knee: L.bloomKnee, bloomScale: L.bloomScale, bloomScreen: L.bloomScreen, bloomTint: L.bloomTint, dof: L.dof,
       veil: L.veil, veilK: L.veilK && [L.veilK[0], L.veilK[1], L.veilK[2] * (1 - Skills.darken)] });   // 궁극기로 어두워질 땐 공기도 걷힘
   },
@@ -526,6 +527,7 @@ const Renderer = {
     const cel = Object.assign({ soft: 0.03, shade: 0.95, lit: 2.0, sky: 0, rim: 0.45, grad: 0, metal: 1, sheer: 0 }, L.cel);   // 캐릭터 그림체 (테마에 없는 값은 예전 그대로)
     gl.uniform4fv(u.uCelLook, [cel.soft, cel.shade, cel.lit, cel.sky]);
     gl.uniform4fv(u.uCelLook2, [cel.rim, cel.grad, cel.metal, cel.sheer]);
+    gl.uniform1f(u.uOldRim, L.cel ? 0 : 1);   // cel 설정이 없는 테마(동굴)는 예전 테두리 빛
     gl.uniform1f(u.uTerm, L.terminator ?? 0.22);          // 테마별 그림체 (값이 없는 테마는 예전 그대로)
     gl.uniform1f(u.uShadeDesat, L.shadeDesat ?? 0);
     gl.uniform1f(u.uLeafGlow, L.leafGlow ?? 0);

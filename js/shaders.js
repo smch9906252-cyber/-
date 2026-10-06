@@ -219,6 +219,7 @@ uniform vec3 uRuneColor;   // 망토 문장의 칼날 실 색
 uniform float uCelAmbient; // 캐릭터 그늘 밝기 (숲 1, 어두운 동굴은 낮게)
 uniform vec4 uCelLook;     // 캐릭터 그림체: x 명암 경계 너비(0보다 크게), y 그늘 밝기, z 밝은 면 밝기, w 그늘이 하늘·땅빛을 받는 정도
 uniform vec4 uCelLook2;    // x 윤곽 빛, y 밝은 면의 둥근 그러데이션, z 금속 대비, w 얇은 천(망토)에 비치는 햇빛
+uniform float uOldRim;     // 1이면 예전 테두리 빛 (테마에 cel 설정이 없을 때: 늘 그늘인 동굴에서도 윤곽이 보이게)
 uniform vec4 uLights[12];      // 주변을 비추는 빛 (횃불·수정·검): xyz 위치, w 닿는 거리(m)
 uniform vec3 uLightColors[12];
 uniform int uLightCount;
@@ -396,16 +397,20 @@ void main() {
     }
     // 테두리 빛 (왕눈풍): 해를 향한 쪽 윤곽에만 또렷한 띠, 해가 뒤에 있으면(역광) 넓고 밝아짐. 그늘 쪽 윤곽은 하늘빛
     float fr = 1.0 - max(dot(n, v), 0.0);
-    float back = max(dot(-v, uSunDir), 0.0);
-    float band = smoothstep(0.6 - back * 0.2, 0.68 - back * 0.2, fr);
-    float sunSide = smoothstep(-0.3, 0.3, dot(n, uSunDir) + back * 0.3);
-    vec3 rimC = mix(base * 2.0, vec3(0.9), 0.35) * uSunColor;   // 어두운 갑옷·머리도 테두리가 보이게 흰빛을 조금 섞음
-    col += rimC * band * sunSide * (0.25 + 0.75 * back) * mix(0.4 * uCelAmbient, 1.0, sh) * uCelLook2.x * 1.8;
-    col += base * uSkyColor * 0.6 * band * (1.0 - sunSide) * uCelAmbient;
+    if (uOldRim > 0.5) {
+      col += base * uSunColor * uCelLook2.x * smoothstep(0.62, 0.82, fr) * (0.35 * uCelAmbient + 0.65 * ramp);   // 예전처럼 윤곽 전체에 은은히
+    } else {
+      float back = max(dot(-v, uSunDir), 0.0);
+      float band = smoothstep(0.6 - back * 0.2, 0.68 - back * 0.2, fr);
+      float sunSide = smoothstep(-0.3, 0.3, dot(n, uSunDir) + back * 0.3);
+      vec3 rimC = mix(base * 2.0, vec3(0.9), 0.35) * uSunColor;   // 어두운 갑옷·머리도 테두리가 보이게 흰빛을 조금 섞음
+      col += rimC * band * sunSide * (0.25 + 0.75 * back) * mix(0.4 * uCelAmbient, 1.0, sh) * uCelLook2.x * 1.8;
+      col += base * uSkyColor * 0.6 * band * (1.0 - sunSide) * uCelAmbient;
+    }
   }
   if (leafy) col += base * uSunColor * pow(max(dot(-v, uSunDir), 0.0), 4.0) * 0.55 * (0.3 + 0.7 * sh);   // 역광에 비치는 잎
   float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0);
-  if (uCel < 0.5) col += uSunColor * uRim * 0.2 * smoothstep(0.35, 0.6, rim) * (0.4 + 0.6 * light);   // 윤곽 빛 (캐릭터는 위에서 따로)
+  if (uCel < 0.5 || uOldRim > 0.5) col += uSunColor * uRim * 0.2 * smoothstep(0.35, 0.6, rim) * (0.4 + 0.6 * light);   // 윤곽 빛 (새 그림체의 캐릭터는 위에서 따로)
   if (mat == 5) col += base * 0.35 * rim;                         // 천의 부드러운 광택
   if (skin && uCel < 0.5) col += base * vec3(0.35, 0.1, 0.06) * (1.0 - light) * 0.8;   // 그늘진 피부는 붉은 기운 (피부 속으로 스민 빛)
   if (hairMat) {   // 검은 머리의 윤기 띠
@@ -858,6 +863,7 @@ precision mediump float;
 in vec2 vUv;
 uniform sampler2D uScene;
 uniform vec2 uSun;
+uniform float uCloudRays;   // 1이면 볕 받은 구름도 빛줄기를 냄 (해가 산 너머에 걸린 노을)
 out vec4 outColor;
 void main() {
   vec2 uv = vUv;
@@ -866,7 +872,7 @@ void main() {
   for (int i = 0; i < 48; i++) {
     uv -= delta;
     vec4 s = texture(uScene, uv);
-    sum += step(0.9, s.a) * max(dot(s.rgb, vec3(0.333)) - 0.55, 0.0) * decay;
+    sum += mix(step(0.9, s.a), smoothstep(0.6, 0.84, s.a), uCloudRays) * max(dot(s.rgb, vec3(0.333)) - 0.55, 0.0) * decay;
     decay *= 0.97;
   }
   outColor = vec4(vec3(sum / 48.0 * 3.0), 1.0);
@@ -1101,7 +1107,12 @@ void main() {
   c *= mix(1.0, texture(uAO, vUv).r, uAOStrength * aoMask);
   float sky = smoothstep(0.6, 0.84, sc.a);                     // 하늘 (맑은 하늘 1, 두꺼운 구름 0.85 → 구름도 하늘로 셈. 구름에 가린 해는 빛줄기·렌즈 빛에서만 따로 봄)
   if (uDof.z > 0.0 || uVeilK.z > 0.0) {
-    highp float z = linZ(texture(uDepth, vUv).r);
+    // 깊이: 가운데와 상하좌우 중 가장 가까운 값 (계단 방지로 색이 섞인 윤곽 픽셀이 먼 배경으로 취급되지 않게)
+    highp vec2 px = 1.0 / vec2(textureSize(uDepth, 0));
+    highp float d0 = texture(uDepth, vUv).r;
+    d0 = min(d0, min(texture(uDepth, vUv + vec2(px.x, 0.0)).r, texture(uDepth, vUv - vec2(px.x, 0.0)).r));
+    d0 = min(d0, min(texture(uDepth, vUv + vec2(0.0, px.y)).r, texture(uDepth, vUv - vec2(0.0, px.y)).r));
+    highp float z = linZ(d0);
     if (uDof.z > 0.0) {   // 먼 숲·산은 물감이 번진 듯 부드럽게 (가까운 전사·나무는 또렷하게, 하늘은 덜)
       vec4 s = texture(uSoft, vUv);
       float k = smoothstep(uDof.x, uDof.y, z) * uDof.z * aoMask * (1.0 - 0.5 * sky) * smoothstep(0.02, 0.2, s.a);
