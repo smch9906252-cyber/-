@@ -2,18 +2,29 @@
 
 // 테마별 빛과 하늘 (밝기 숫자는 1보다 커도 됨: 마지막에 화면에 맞게 눌러 줌)
 const LIGHTING = {
+  // 맑은 낮 숲 (젤다 야숨풍): 부드러운 햇빛, 밝은 그늘, 옅은 하늘색 공기, 파스텔 연두
   forest: {
     sunDir: V3.normalize([-0.6, 0.55, 0.58]),   // 해가 있는 방향 (서남쪽, 늦은 오후)
-    sunColor: [2.15, 1.8, 1.36],                // 햇빛 (따뜻한 금빛)
-    skyColor: [0.4, 0.55, 0.8],                 // 위에서 오는 하늘빛
-    groundColor: [0.2, 0.18, 0.1],              // 아래에서 반사되는 땅빛
-    fogColor: [0.56, 0.71, 0.9],                // 안개 = 지평선 하늘 색 (맑은 푸른빛)
-    zenith: [0.1, 0.3, 0.85],                   // 머리 위 하늘 색 (짙고 맑은 파랑)
+    sunColor: [1.6, 1.48, 1.2],                 // 햇빛 (부드러운 금빛. 너무 세면 풀이 형광 연두로 타 버림)
+    skyColor: [0.42, 0.44, 0.48],               // 위에서 오는 하늘빛 (흰빛에 가까운 옅은 푸른빛)
+    groundColor: [0.3, 0.33, 0.18],             // 아래에서 반사되는 땅빛 (밝은 풀밭의 연둣빛이 나무 밑면을 밝힘)
+    fogColor: [0.32, 0.5, 0.8],                 // 안개 = 지평선 하늘 색 (옅은 하늘색, 멀수록 푸르스름)
+    zenith: [0.2, 0.32, 0.61],                  // 머리 위 하늘 색 (맑고 옅은 파랑)
     cloudLit: [1.3, 1.24, 1.15],                // 구름의 볕 받은 쪽 색
     cloudShade: [0.58, 0.64, 0.78],             // 구름 그늘 색
     rays: 1,                                    // 빛줄기 세기
     particles: true,                            // 떠다니는 빛 알갱이
     particleColor: [1.0, 0.93, 0.65],           // 꽃가루 (금빛)
+    terminator: 0.45,                           // 빛과 그늘 경계의 너비 (클수록 붓으로 문지른 듯 부드러움, 기본 0.22)
+    shadeDesat: 0.4,                            // 그늘의 색을 빼는 정도 (짙은 초록 대신 차분한 회녹색 그늘)
+    leafGlow: 0.12,                             // 그늘진 잎으로 비쳐 드는 햇빛 (나무 그늘이 칙칙하지 않게)
+    moss: [0.1, 0.15, 0.05],                    // 바위 윗면 이끼 색 (옅은 올리브)
+    saturation: 1.08,                           // 화면 채도 (기본 1.22)
+    contrast: 0.97,                             // 화면 대비 (기본 1.05, 낮을수록 공기처럼 부드러움)
+    split: 0.7,                                 // 그늘은 푸르게·밝은 곳은 따뜻하게 나누는 정도 (기본 1)
+    lift: [0.015, 0.02, 0.03],                  // 어두운 곳을 하늘빛으로 살짝 띄움 (흐린 물감 느낌)
+    aoStrength: 0.6,                            // 주변 가림 세기 (기본 0.85)
+    farHaze: 1.35,                              // 먼 산 안개 배율 (멀수록 푸르게 흐려짐)
   },
   // 노을 진 저녁 숲: 낮게 깔린 주황빛 해, 보랏빛 하늘, 분홍빛 구름, 반딧불
   dusk: {
@@ -316,7 +327,8 @@ const Renderer = {
     const rayStrength = cw > 0 && CONFIG.graphics.godRays ? L.rays * Utils.smooth((facing - 0.1) / 0.6) : 0;
     const pal = Skills.ult ? Skills.ult.pal : Weapons.cur;   // 번쩍임 색은 궁극기를 쓴 무기의 속성 색 (어둡게 물드는 것은 세상·하늘을 그릴 때 이미 처리)
     Post.end({ sunUV: [(cx / cw) * 0.5 + 0.5, (cy / cw) * 0.5 + 0.5], rayStrength: rayStrength * (1 - Skills.darken), rayColor: V3.scale(L.sunColor, 0.18), proj, near, far,
-      flash: Skills.flash, flashColor: pal.flash, grade: L.grade });
+      flash: Skills.flash, flashColor: pal.flash, grade: L.grade,
+      sat: L.saturation, contrast: L.contrast, split: L.split, lift: L.lift, ao: L.aoStrength });
   },
 
   // 해 쪽에서 내려다보는 카메라: 전사 앞쪽 ahead(m) 지점을 중심으로 가로세로 2R(m), 깊이 ±depth(m)
@@ -463,6 +475,10 @@ const Renderer = {
     gl.uniform3fv(u.uDimTint, (Skills.ult ? Skills.ult.pal : Weapons.cur).dark);
     gl.uniform1f(u.uWaterLevel, World.waterLevel === null ? -100 : World.waterLevel);
     gl.uniform1f(u.uCelAmbient, L.celAmbient ?? 1);
+    gl.uniform1f(u.uTerm, L.terminator ?? 0.22);          // 테마별 그림체 (값이 없는 테마는 예전 그대로)
+    gl.uniform1f(u.uShadeDesat, L.shadeDesat ?? 0);
+    gl.uniform1f(u.uLeafGlow, L.leafGlow ?? 0);
+    gl.uniform3fv(u.uMoss, L.moss || [0.09, 0.19, 0.04]);
     gl.uniform4fv(u.uLights, this.lights.pos);
     gl.uniform3fv(u.uLightColors, this.lights.col);
     gl.uniform1i(u.uLightCount, this.lights.count);

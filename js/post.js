@@ -167,7 +167,11 @@ const Post = {
       { uScene: this.scene.tex, uBloom: this.bloomA.tex, uRays: this.rays.tex, uAO: this.ao.tex },
       {
         uBloomStrength: CONFIG.graphics.bloom,
-        uAOStrength: ssao ? 0.85 : 0,
+        uAOStrength: ssao ? (opts.ao ?? 0.85) : 0,   // 숲은 약하게 (풀밭이 얼룩지지 않게)
+        uSat: opts.sat ?? 1.22,                       // 테마별 색 보정 (값이 없으면 예전 그대로)
+        uContrast: opts.contrast ?? 1.05,
+        uSplit: opts.split ?? 1,
+        uLift: opts.lift || [0, 0, 0],
         uRayColor: rays ? V3.scale(opts.rayColor, opts.rayStrength) : [0, 0, 0],
         uSun: opts.sunUV,
         uFlare: CONFIG.graphics.lensFlare ? opts.rayStrength : 0,

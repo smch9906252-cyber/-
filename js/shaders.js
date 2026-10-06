@@ -201,6 +201,10 @@ uniform vec4 uLights[12];      // 주변을 비추는 빛 (횃불·수정·검):
 uniform vec3 uLightColors[12];
 uniform int uLightCount;
 uniform sampler2D uLeafTex;
+uniform float uTerm;       // 빛과 그늘 경계의 너비 (기본 0.22, 숲은 넓게 잡아 부드럽게)
+uniform float uShadeDesat; // 그늘의 색을 빼는 정도 (0이면 예전 그대로)
+uniform float uLeafGlow;   // 그늘진 잎으로 비쳐 드는 햇빛 세기 (0이면 없음)
+uniform vec3 uMoss;        // 바위 윗면 이끼 색
 out vec4 outColor;
 ${GLSL_NOISE}
 ${GLSL_FINISH}
@@ -215,7 +219,7 @@ vec3 groundTexture(vec3 base, vec2 p) {
   float stroke = vnoise(q * vec2(2.0, 9.0)) * 0.6 + vnoise(q * vec2(5.0, 19.0)) * 0.4;
   float dirt = smoothstep(-0.01, 0.04, base.r - base.g * 0.85);
   vec3 c = base * (0.8 + 0.3 * big + 0.14 * mid) * (0.88 + 0.24 * stroke);
-  c = mix(c, c * vec3(1.25, 1.15, 0.7), smoothstep(0.55, 0.8, big) * (1.0 - dirt) * 0.6);   // 노란 풀빛 얼룩
+  c = mix(c, c * vec3(1.2, 1.14, 0.84), smoothstep(0.55, 0.8, big) * (1.0 - dirt) * 0.6);   // 노란 풀빛 얼룩 (파스텔: 파란빛을 덜 빼서 탁한 형광 노랑이 되지 않게)
   float peb = vnoise(p * 9.0);
   c = mix(c, c * 1.35, dirt * smoothstep(0.74, 0.8, peb));            // 밝은 자갈
   c = mix(c, c * 0.7, dirt * smoothstep(0.76, 0.84, vnoise(p * 9.0 + 3.7)));
@@ -238,7 +242,14 @@ vec3 rockTexture(vec3 base, vec3 w, vec3 n) {
   vec3 c = base * (0.7 + 0.45 * t + 0.15 * fine);
   c *= 1.0 - smoothstep(0.9, 0.97, crack) * 0.45;
   float moss = smoothstep(0.45, 0.75, n.y + (t - 0.5) * 0.5);
-  return mix(c, vec3(0.09, 0.19, 0.04) * (0.8 + 0.4 * fine), moss);
+  return mix(c, uMoss * (0.8 + 0.4 * fine), moss);   // 이끼 색은 테마별 (숲은 옅은 올리브)
+}
+
+// 4x4 규칙 무늬 문턱값 (0~1): 무작위 점보다 고르게 비워져 지글거리는 얼룩이 생기지 않음
+float bayer4(vec2 p) {
+  const float B[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+  ivec2 i = ivec2(mod(p, 4.0));
+  return (B[i.x + i.y * 4] + 0.5) / 16.0;
 }
 
 // 횃불·수정 같은 점 빛을 모두 더함 (거리에 따라 부드럽게 약해짐, wrap: 빛이 뒤쪽까지 감기는 정도)
@@ -263,7 +274,7 @@ void main() {
     float t = clamp(dot(vWorld - uCamPos, seg) / max(dot(seg, seg), 0.001), 0.0, 1.0);
     float line = smoothstep(0.5, 1.0, length(vWorld - (uCamPos + seg * t))) + step(0.88, t);
     float keep = min(smoothstep(0.6, 2.2, length(vWorld - uCamPos)), 0.12 + line);
-    if (hash12(floor(gl_FragCoord.xy)) > keep) discard;
+    if (bayer4(gl_FragCoord.xy) > keep) discard;
   }
   int mat = vColor.a < -0.5 ? int(-vColor.a + 0.5) : 0;   // 1 잎, 2 잎 판, 3 나무껍질, 4 바위, 5 천, 6 빛남, 7 피부, 8 머리카락, 9 수정
   float shine = max(vColor.a, 0.0);
@@ -300,23 +311,27 @@ void main() {
     vec3 q = vWorld * 1.8;
     float clump = (vnoise(q.xz + q.y * 0.7) + vnoise(q.zy * 1.3 + 5.1) + vnoise(q.xy * 1.1 + 9.7)) / 3.0;
     float fine = vnoise(vWorld.xz * 7.0 + vWorld.y * 4.0);
-    base *= 0.7 + 0.55 * smoothstep(0.38, 0.72, clump) + 0.14 * fine;
-    base = mix(base, base * vec3(1.15, 1.12, 0.75), smoothstep(0.6, 0.8, clump) * 0.5);   // 볕 받은 잎끝은 노르스름하게
+    base *= 0.8 + 0.4 * smoothstep(0.38, 0.72, clump) + 0.1 * fine;   // 틈을 덜 어둡게 → 큰 붓으로 찍은 듯 부드러운 잎 덩어리
+    base = mix(base, base * vec3(1.18, 1.14, 0.82), smoothstep(0.58, 0.8, clump) * 0.6);   // 볕 받은 잎끝은 노르스름하게
   }
   if (mat == 4) base = rockTexture(base, vWorld, n);
   bool leafy = mat == 1 || mat == 2;
   bool skin = mat == 7, hairMat = mat == 8;
-  if (uGrass > 0.5) base *= 1.0 + vGust * smoothstep(0.0, 0.08, vWind) * 0.3;    // 바람 물결이 지나가면 풀끝이 반짝
+  if (uGrass > 0.5) base = mix(base, base * 1.15 + vec3(0.03, 0.035, 0.025), vGust * smoothstep(0.0, 0.08, vWind));   // 바람 물결이 지나가면 풀끝이 은빛으로 옅게 반짝 (야숨 풀밭처럼)
 
-  float sh = (uShadowOn > 0.5 ? shadowAt(vWorld) : uShadowOutside) * cloudShadow(vWorld);
+  float cloud = cloudShadow(vWorld);
+  float sh = (uShadowOn > 0.5 ? shadowAt(vWorld) : uShadowOutside) * cloud;
   float under = uGroundDetail > 0.5 ? clamp(uWaterLevel - vWorld.y, 0.0, 3.0) : 0.0;   // 물속 깊이
   if (under > 0.0) base = mix(base, base * vec3(0.5, 0.78, 0.8), smoothstep(0.0, 0.5, under));
   float wrap = leafy ? 0.5 : skin ? 0.35 : 0.05;
   float ndl = (dot(n, uSunDir) + wrap) / (1.0 + wrap);
-  float light = smoothstep(0.0, 0.22, ndl) * sh;                 // 만화처럼 또렷한 명암 경계
+  float light = smoothstep(0.0, max(uTerm, 0.01), ndl) * sh;    // 명암 경계 (숲은 넓게 잡아 붓으로 문지른 듯 부드럽게)
   vec3 ambient = mix(uGroundColor, uSkyColor, n.y * 0.5 + 0.5) * vAO;
-  vec3 col = base * (ambient + uSunColor * light * mix(1.0, vAO, 0.4));
-  col += base * uSkyColor * 0.25 * (1.0 - light);                // 그늘은 하늘빛을 받아 살짝 푸르게
+  // 그늘은 물감을 덜 진하게: 색을 조금 빼서 짙은 초록 대신 차분한 회녹색 (uShadeDesat이 0이면 예전과 같음)
+  vec3 shadeBase = mix(base, vec3(dot(base, vec3(0.2126, 0.7152, 0.0722))), uShadeDesat * (1.0 - light));
+  vec3 col = shadeBase * ambient + base * uSunColor * light * mix(1.0, vAO, 0.4);
+  col += shadeBase * uSkyColor * 0.25 * (1.0 - light);           // 그늘은 하늘빛을 받아 살짝 푸르게
+  if (leafy) col += base * uSunColor * uLeafGlow * (1.0 - light) * cloud;   // 그늘진 잎도 햇빛이 비쳐 들어 은은한 연둣빛
   if (uCel > 0.5) {
     // 애니메이션풍: 밝은 면과 그늘 두 단계로 또렷하게. 그늘은 어둡게만 하지 않고 색을 입힘 (피부는 분홍, 옷·갑옷은 보랏빛 파랑)
     float hl = dot(n, uSunDir) * 0.5 + 0.5;
@@ -907,6 +922,10 @@ uniform float uFlare;     // 렌즈 플레어 세기
 uniform float uAspect;
 uniform vec3 uFlashAdd;   // 번개가 칠 때 화면 전체에 더하는 빛
 uniform vec3 uGrade;      // 구역 분위기 색 보정 (낮: 그대로, 노을: 주홍빛)
+uniform float uSat;       // 채도 배율 (기본 1.22)
+uniform float uContrast;  // 대비 배율 (기본 1.05)
+uniform float uSplit;     // 그늘은 푸르게·밝은 곳은 따뜻하게 나누는 정도 (기본 1)
+uniform vec3 uLift;       // 어두운 곳을 살짝 띄우는 색 (기본 0)
 out vec4 outColor;
 const float GHOST_T[4] = float[4](0.7, 1.15, 1.5, 2.1);
 const float GHOST_R[4] = float[4](0.05, 0.12, 0.035, 0.09);
@@ -936,10 +955,11 @@ void main() {
     c += fl * vis * uFlare;
   }
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  c = mix(vec3(l), c, 1.22);                                   // 채도 올림 (맑고 선명한 색)
-  c = (c - 0.5) * 1.05 + 0.5;                                  // 대비 살짝 올림
-  c = mix(c * vec3(0.94, 1.0, 1.08), c * vec3(1.05, 1.0, 0.92), smoothstep(0.2, 0.8, l));   // 그늘은 푸르게, 밝은 곳은 따뜻하게
+  c = mix(vec3(l), c, uSat);                                   // 채도 (기본 1.22, 숲은 낮춰 부드러운 파스텔 색)
+  c = (c - 0.5) * uContrast + 0.5;                             // 대비 (숲은 살짝 낮춰 공기처럼 맑게)
+  c = mix(c * mix(vec3(1.0), vec3(0.94, 1.0, 1.08), uSplit), c * mix(vec3(1.0), vec3(1.05, 1.0, 0.92), uSplit), smoothstep(0.2, 0.8, l));   // 그늘은 푸르게, 밝은 곳은 따뜻하게
   c *= uGrade;
+  c = c * (1.0 - uLift) + uLift;                               // 어두운 곳을 하늘빛으로 살짝 띄움 (흐린 물감 느낌)
   c += uFlashAdd;
   vec2 d = vUv - 0.5;
   c *= 1.0 - dot(d, d) * 0.55;                                 // 가장자리 살짝 어둡게

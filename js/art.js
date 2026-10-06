@@ -6,25 +6,25 @@ const MAT = { LEAF: -1, CARD: -2, BARK: -3, ROCK: -4, CLOTH: -5, GLOW: -6, SKIN:
 const rgb = (hex, m = 0) => Utils.color(hex, m);
 
 const COLORS = {
-  bark: rgb('#5b3c25', MAT.BARK),
-  pine: [rgb('#1f5a30', MAT.LEAF), rgb('#256836', MAT.LEAF), rgb('#2c753c', MAT.LEAF), rgb('#368244', MAT.LEAF)],
-  pineUnder: rgb('#173f24', MAT.LEAF),
-  leaf: [rgb('#3f8a2e', MAT.LEAF), rgb('#4c9a35', MAT.LEAF), rgb('#5aa83c', MAT.LEAF), rgb('#377a2a', MAT.LEAF)],
-  bushLeaf: [rgb('#2f742c', MAT.LEAF), rgb('#3c8432', MAT.LEAF), rgb('#2a6226', MAT.LEAF)],
+  bark: rgb('#6a6450', MAT.BARK),          // 올리브빛이 도는 회갈색 줄기 (주황 갈색이 아니라 이끼 낀 나무 느낌)
+  pine: [rgb('#3e5a3e', MAT.LEAF), rgb('#46623f', MAT.LEAF), rgb('#4e6b44', MAT.LEAF), rgb('#587449', MAT.LEAF)],   // 차분한 짙은 솔잎색
+  pineUnder: rgb('#2e4030', MAT.LEAF),
+  leaf: [rgb('#5a7a3a', MAT.LEAF), rgb('#64843f', MAT.LEAF), rgb('#6f8e45', MAT.LEAF), rgb('#516e36', MAT.LEAF)],   // 볕 받으면 노르스름한 파스텔 연두
+  bushLeaf: [rgb('#4c6436', MAT.LEAF), rgb('#56703c', MAT.LEAF), rgb('#465c33', MAT.LEAF)],
   birch: rgb('#e4e0d4', MAT.BARK),
   birchDark: rgb('#2b2a28', MAT.BARK),
-  birchLeaf: [rgb('#86b23e', MAT.LEAF), rgb('#97bf4a', MAT.LEAF), rgb('#76a536', MAT.LEAF)],
-  fern: rgb('#3d8030', MAT.LEAF),
-  reed: rgb('#557f33', MAT.LEAF),
+  birchLeaf: [rgb('#6e8748', MAT.LEAF), rgb('#78904e', MAT.LEAF), rgb('#647d42', MAT.LEAF)],
+  fern: rgb('#56743c', MAT.LEAF),
+  reed: rgb('#6d7f45', MAT.LEAF),
   cattail: rgb('#5a3a20'),
-  lily: rgb('#3f8a3a', MAT.LEAF),
+  lily: rgb('#4f7a45', MAT.LEAF),
   berry: rgb('#c8282c'),
-  rock: rgb('#8a8d93', MAT.ROCK),
+  rock: rgb('#858582', MAT.ROCK),          // 따뜻한 회색 바위 (볕 받으면 밝은 베이지)
   woodCut: rgb('#b08a5a'),
   mushroomCap: rgb('#c0302a'),
   mushroomStem: rgb('#ece4d0'),
-  grassBase: rgb('#2f6222', MAT.LEAF),
-  grassTip: rgb('#7fb346', MAT.LEAF),
+  grassBase: rgb('#435232', MAT.LEAF),     // 풀뿌리: 탁한 올리브 (너무 어두우면 풀밭이 얼룩덜룩)
+  grassTip: rgb('#6f964e', MAT.LEAF),      // 풀끝: 볕 받으면 파스텔 연두
   petal: rgb('#f4f0e8'),
   flowerCenter: rgb('#f2b630'),
   steel: rgb('#dfe5ec', 1),
@@ -44,7 +44,7 @@ const COLORS = {
   blueLeather: rgb('#1f3358'),
   snow: rgb('#f2f5fa'),
   cliff: rgb('#7d838e'),
-  farForest: rgb('#2c5a3c'),
+  farForest: rgb('#46644c'),            // 먼 숲 (안개에 섞이면 푸르스름한 회녹색)
   caveRock: rgb('#6b655d', MAT.ROCK),     // 동굴 바위 (따뜻한 회갈색)
   caveCeil: rgb('#4a4540', MAT.ROCK),     // 동굴 천장 (더 어둡게)
   crystal: rgb('#e6f6ff', MAT.CRYSTAL),   // 수정 (색은 배치할 때 하늘빛·보랏빛으로 물들임)
@@ -736,7 +736,7 @@ function hillHeight(x, z, cx, cz) {
 function buildHills(cx, cz) {
   const radii = [];
   for (let R = 58; R <= 230; R += 8) radii.push(R);
-  const green = rgb('#3f6f34'), top = rgb('#6f9a45');
+  const green = rgb('#5a7c48'), top = rgb('#8aa35c');   // 언덕: 옅은 올리브 → 볕 받은 꼭대기는 파스텔 연두
   return ringTerrain(cx, cz, radii, 160, (x, z) => hillHeight(x, z, cx, cz),
     (p, n) => Utils.mixColor(COLORS.farForest, Utils.mixColor(green, top, Utils.smooth((p[1] - 10) / 25)), Utils.smooth(n[1] * 2 - 1)));
 }

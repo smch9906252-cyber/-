@@ -6,11 +6,11 @@ const MARGIN = 5;   // 맵 바깥에 둘러 심는 숲의 두께 (칸)
 
 // 땅 색 (선형 RGB)
 const GROUND = {
-  grass: Utils.color('#5a9a3a'),
-  grassDry: Utils.color('#9fb04d'),
-  forest: Utils.color('#2f3d1e'),
-  dirt: Utils.color('#8b6a43'),
-  mud: Utils.color('#5a4a30'),
+  grass: Utils.color('#62864a'),     // 볕 받으면 파스텔 연두가 되는 풀밭
+  grassDry: Utils.color('#7a8d4e'),  // 마른 풀 얼룩 (노르스름한 올리브)
+  forest: Utils.color('#4f5a34'),    // 숲 바닥 (검지 않은 짙은 올리브, 먼 들판도 이 색)
+  dirt: Utils.color('#7d6e55'),      // 흙길 (볕 받으면 밝은 베이지빛)
+  mud: Utils.color('#4a4236'),
 };
 // 동굴 바닥 색 (위와 같은 이름: 바닥·마른 바닥·벽 밑·길·젖은 곳)
 const CAVE_GROUND = {
@@ -447,7 +447,7 @@ const World = {
     }
     this.meshes = [{ mesh: GL.createMesh(this.buildGround(shadeAt)), cull: true, ground: true }];
     if (cave) this.meshes.push({ mesh: GL.createMesh(this.buildCeiling()), cull: false, shadow: true, ao: 0 });
-    else this.meshes.push({ mesh: GL.createMesh(buildMountains((this.cols * CELL) / 2, (this.rows * CELL) / 2)), cull: false, fog: 0.0019 });
+    else this.meshes.push({ mesh: GL.createMesh(buildMountains((this.cols * CELL) / 2, (this.rows * CELL) / 2)), cull: false, fog: 0.0019 * (LIGHTING[this.level.theme].farHaze || 1) });   // 먼 산은 테마별로 더 흐리게 (공기 원근감)
     for (const name in inst) {
       if (!inst[name].length) continue;
       const st = PROP_STYLE[name];
