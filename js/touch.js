@@ -86,6 +86,10 @@ const TouchControls = {
         this.portraitOK = true;
         continue;
       }
+      if (UI.restartAt(x, y)) {   // '처음부터' 버튼
+        Game.restart();
+        continue;
+      }
       const b = this.buttonAt(x, y);
       if (b) {
         this.held[b.id] = { id, x, y, sx: x, sy: y, drag: false };

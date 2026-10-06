@@ -93,6 +93,7 @@ const UI = {
     }
 
     this.drawTitle(level, levelTime);
+    this.drawRestart(levelTime);
     this.drawHints(levelTime);
     this.drawMessage();
 
@@ -918,6 +919,35 @@ const UI = {
     g.fill();
     const na = -player.yaw - Math.PI / 2 - Math.PI / 2;   // 북쪽(-z) 표시
     this.text('N', cx + Math.cos(na) * (R - 10 * s), cy + Math.sin(na) * (R - 10 * s), 12, '#ffe08a', 'center');
+  },
+
+  // 이어 하기로 시작했을 때: 처음 10초 동안 '처음부터' 버튼 (누르면 제1장부터)
+  restartBox: null,
+  drawRestart(t) {
+    this.restartBox = null;
+    if (!Game.resumed || Game.levelIndex === 0) return;
+    const a = Utils.clamp((10 - t) / 1.5, 0, 1);
+    if (a <= 0) {
+      Game.resumed = false;
+      return;
+    }
+    const g = this.g, s = this.s, W = this.canvas.width, H = this.canvas.height;
+    const msg = '↺ 처음부터 하기';
+    g.font = this.font(15);
+    const w = g.measureText(msg).width + 36 * s, h = 34 * s, x = W / 2 - w / 2, y = H * 0.28 + 64 * s;
+    g.save();
+    g.globalAlpha = a;
+    this.panel(x, y, w, h, h / 2);
+    g.restore();
+    this.text(msg, W / 2, y + h / 2, 15, '#ffe7a8', 'center', a);
+    this.text('저장된 구역부터 이어 합니다', W / 2, y + h + 16 * s, 12, '#ffffff', 'center', a * 0.8);
+    this.restartBox = { x, y, w, h };
+  },
+
+  // (x, y)가 '처음부터' 버튼 위인지 (HUD 캔버스 픽셀)
+  restartAt(x, y) {
+    const b = this.restartBox;
+    return !!b && x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
   },
 
   // 지역 이름: 처음 몇 초 동안 떠올랐다 사라짐

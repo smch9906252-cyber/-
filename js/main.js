@@ -14,6 +14,7 @@ const Game = {
   fadeDir: 0,       // 1: 어두워지는 중, -1: 밝아지는 중
   afterFade: null,  // 완전히 어두워졌을 때 할 일
   hitStop: 0,       // 적을 때린 순간 게임을 아주 잠깐 거의 멈춤 (남은 초)
+  resumed: false,   // 저장된 구역부터 이어 하는 중인지 (처음 몇 초 '처음부터' 버튼을 보여 줌)
 
   start() {
     if (!GL.init(viewCanvas)) {
@@ -27,12 +28,23 @@ const Game = {
     Renderer.init();
     UI.init(hudCanvas);
     Camera.init();
-    this.loadLevel(0);
+    const saved = Save.level();   // 이 브라우저에서 마지막으로 도착한 구역부터
+    this.resumed = saved > 0;
+    this.loadLevel(saved);
     return true;
+  },
+
+  // 처음 구역부터 다시
+  restart() {
+    this.resumed = false;
+    this.finished = false;
+    Save.setLevel(0);
+    this.fadeTo(() => this.loadLevel(0));
   },
 
   loadLevel(index) {
     this.levelIndex = index;
+    if (index > Save.level()) Save.setLevel(index);
     const level = LEVELS[index];
     World.load(level);
     this.player = new Player(World.start.x, World.start.z, World.start.angle);
@@ -119,6 +131,24 @@ const Game = {
   draw() {
     Renderer.draw(this.player, this.time);
     UI.draw(this.player, this.time - this.levelStart, World.level);
+  },
+};
+
+// 진행 저장: 도착한 구역 번호를 이 브라우저에만 기억 (막힌 곳에서는 저장 없이 처음부터)
+const Save = {
+  key: 'warrior-level',
+  level() {
+    try {
+      const v = parseInt(localStorage.getItem(this.key), 10);
+      return v >= 0 && v < LEVELS.length ? v : 0;
+    } catch (e) {
+      return 0;
+    }
+  },
+  setLevel(i) {
+    try {
+      localStorage.setItem(this.key, String(i));
+    } catch (e) { /* 저장이 막힌 곳 */ }
   },
 };
 

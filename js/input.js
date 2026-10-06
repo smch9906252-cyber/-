@@ -30,7 +30,12 @@ const Input = {
 
     // 화면을 클릭하면 마우스를 고정해서 시점 회전에 사용 (Esc로 해제)
     // 고정이 안 되는 곳에서는 오른쪽 버튼을 누른 채 끌어서 둘러보고, 왼쪽 클릭으로 공격
-    canvas.addEventListener('click', () => {
+    canvas.addEventListener('click', (e) => {
+      const r = canvas.getBoundingClientRect(), k = canvas.width / r.width;
+      if (!this.locked && UI.restartAt((e.clientX - r.left) * k, (e.clientY - r.top) * k)) {   // '처음부터' 버튼
+        Game.restart();
+        return;
+      }
       if (this.locked || this.lockFailed) return;
       try {
         const r = canvas.requestPointerLock();
@@ -49,6 +54,8 @@ const Input = {
       this.mouseDY += e.movementY;
     });
     canvas.addEventListener('mousedown', (e) => {
+      const r = canvas.getBoundingClientRect(), k = canvas.width / r.width;
+      if (UI.restartAt((e.clientX - r.left) * k, (e.clientY - r.top) * k)) return;   // 버튼을 누른 것은 공격이 아님
       if (e.button === 0 && (this.locked || this.lockFailed)) this.pressed.Mouse0 = true;
       if (e.button === 2 && !this.locked) this.dragging = true;
     });
