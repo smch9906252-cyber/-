@@ -1,5 +1,6 @@
 // 소리: 소리 파일 없이 브라우저가 그 자리에서 만들어 내는 효과음 (Web Audio)
-// 칼바람·타격·적이 쓰러지는 소리·스킬·보스, 그리고 구역마다 은은한 배경 소리 (숲: 바람과 새, 동굴: 물방울).
+// 칼바람·타격·적이 쓰러지는 소리·스킬·보스, 구역마다 은은한 배경 소리 (숲: 바람과 새, 동굴: 물방울),
+// 그리고 잔잔한 배경 음악 (숲: 따뜻한 화음과 뜯는 소리, 동굴: 낮은 울림과 수정 종소리, 보스: 북소리).
 // 브라우저는 사용자가 화면을 누르거나 키를 누르기 전엔 소리를 막으므로 첫 입력 때 켭니다. M 키(터치: 스피커 버튼)로 끄고 켬.
 const Sound = {
   ctx: null,
@@ -9,6 +10,11 @@ const Sound = {
   volume: 0.7,
   ambientTimer: 0,
   wind: null,        // 숲의 바람 소리 (계속 재생)
+  music: null,       // 배경 음악 버스 (음량 조절용)
+  musicVolume: 0.5,
+  beat: 0,           // 다음 음악 박자까지 남은 시간
+  bar: 0,            // 지금 몇 번째 마디인지 (화음 진행)
+  drone: null,       // 동굴의 낮은 울림 (계속 재생)
 
   init() {
     try {
@@ -33,6 +39,19 @@ const Sound = {
     this.master = ctx.createGain();
     this.master.gain.value = this.muted ? 0 : this.volume;
     this.master.connect(comp);
+    this.music = ctx.createGain();
+    this.music.gain.value = this.musicVolume;
+    // 음악에 넓은 울림 (짧은 소음으로 만든 잔향)
+    const verb = ctx.createConvolver(), irLen = ctx.sampleRate * 2.2, ir = ctx.createBuffer(2, irLen, ctx.sampleRate);
+    for (let c = 0; c < 2; c++) {
+      const d = ir.getChannelData(c);
+      for (let i = 0; i < irLen; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / irLen, 3);
+    }
+    verb.buffer = ir;
+    const wet = ctx.createGain();
+    wet.gain.value = 0.45;
+    this.music.connect(this.master);
+    this.music.connect(verb).connect(wet).connect(this.master);
     const len = ctx.sampleRate, buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     this.noise = buf;
@@ -207,9 +226,34 @@ const Sound = {
 
   // ---------- 배경 소리 ----------
 
-  // 구역을 불러올 때: 숲은 바람 소리를 깔고, 동굴은 끔
+  // 구역을 불러올 때: 숲은 바람 소리를 깔고, 동굴은 끔. 음악도 구역에 맞게
   setAmbient() {
     if (!this.ctx || !World.level) return;
+    this.bar = 0;
+    this.beat = 0.5;
+    if (this.drone) {
+      const dr = this.drone;
+      dr.gain.gain.setTargetAtTime(0.0001, this.ctx.currentTime, 0.6);
+      setTimeout(() => dr.oscs.forEach((o) => o.stop()), 2500);
+      this.drone = null;
+    }
+    if (World.cave) {   // 동굴: 낮은 A와 E가 살짝 어긋나 일렁이는 울림
+      const ctx = this.ctx, g = ctx.createGain(), f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 380;
+      g.gain.value = 0.0001;
+      g.gain.setTargetAtTime(0.05, ctx.currentTime, 2);
+      const oscs = [55, 55.4, 82.4, 110.3].map((hz) => {
+        const o = ctx.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.value = hz;
+        o.connect(f);
+        o.start();
+        return o;
+      });
+      f.connect(g).connect(this.music);
+      this.drone = { gain: g, oscs };
+    }
     if (this.wind) {
       const w = this.wind;
       w.gain.gain.setTargetAtTime(0.0001, this.ctx.currentTime, 0.4);
@@ -233,9 +277,44 @@ const Sound = {
     this.wind = { src, gain: g };
   },
 
-  // 매 프레임: 가끔 새소리(숲) / 물방울 소리(동굴), 횃불 타닥
+  // 음악 박자 (0.5초마다): 마디마다 화음, 사이사이 뜯는 소리 / 종소리, 보스전엔 북
+  musicStep(dt) {
+    this.beat -= dt;
+    if (this.beat > 0) return;
+    const theme = World.level.theme, boss = Enemies.boss, fight = boss && !boss.dead && boss.state !== 'sleep';
+    const step = fight ? 0.42 : theme === 'dusk' ? 0.62 : 0.5;
+    this.beat += step;
+    const t = this.ctx.currentTime + 0.02, n = this.bar++, out = this.music;
+    const hz = (semi) => 220 * Math.pow(2, semi / 12);   // A3 기준 반음
+    if (fight) {   // 보스전: 쿵·쿵 북 + 낮은 단조 화음, 4마디마다 높은 음
+      this.tone(t, 0.3, 'sine', 90, 40, n % 2 ? 0.25 : 0.4, 0.004, out);
+      if (n % 2) this.noiseHit(t, 0.08, 'bandpass', 1500, 900, 0.06, 1.5, 0.003, out);
+      if (n % 8 === 0) for (const s of [-12, -9, -5]) this.tone(t, step * 7, 'sawtooth', hz(s + (n % 16 ? 0 : -2)), hz(s + (n % 16 ? 0 : -2)), 0.03, 0.5, out, 600);
+      if (n % 4 === 2) this.tone(t, 0.5, 'triangle', hz(7 + (n % 16 > 8 ? 3 : 0)), hz(7), 0.04, 0.01, out);
+      return;
+    }
+    if (World.cave) {   // 동굴: 가끔 높은 수정 종소리 (단조 음계)
+      if (Math.random() < 0.3) {
+        const scale = [0, 3, 5, 7, 10, 12, 15], s = scale[(Math.random() * scale.length) | 0] + 12;
+        this.tone(t, 2.2, 'sine', hz(s), hz(s), 0.035, 0.005, out);
+        this.tone(t, 1.2, 'sine', hz(s) * 2.01, hz(s) * 2.01, 0.01, 0.005, out);
+      }
+      return;
+    }
+    // 숲: 8박자마다 화음이 바뀜 (낮: C–Am–F–G, 노을: Am–F–C–G), 사이사이 오음계 뜯는 소리
+    const prog = theme === 'dusk' ? [[0, 3, 7], [-4, 0, 3], [3, 7, 10], [-2, 2, 5]] : [[3, 7, 10], [0, 3, 7], [-4, 0, 3], [-2, 2, 5]];
+    const chord = prog[Math.floor(n / 8) % 4];
+    if (n % 8 === 0) for (const s of chord) this.tone(t, step * 8, 'triangle', hz(s - 12), hz(s - 12), 0.025, 0.8, out, 900);
+    if (Math.random() < (theme === 'dusk' ? 0.35 : 0.5)) {
+      const s = chord[(Math.random() * 3) | 0] + (Math.random() < 0.5 ? 12 : 0);
+      this.tone(t, 0.6, 'triangle', hz(s), hz(s), 0.035, 0.004, out);
+    }
+  },
+
+  // 매 프레임: 가끔 새소리(숲) / 물방울 소리(동굴), 횃불 타닥, 배경 음악
   update(dt) {
     if (!this.ready || this.muted) return;
+    this.musicStep(dt);
     this.ambientTimer -= dt;
     if (this.ambientTimer > 0) return;
     const t = this.ctx.currentTime + 0.01;

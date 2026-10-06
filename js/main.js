@@ -86,7 +86,6 @@ const Game = {
       UI.toast(Camera.isFirst ? '1인칭 시점' : '3인칭 시점');
     }
     if (Input.wasPressed('KeyM')) Sound.toggleMute();
-    Sound.update(dt);
     const p = this.player;
     p.update(dt, this.time);
     Enemies.update(dt, p, this.time);
@@ -99,7 +98,7 @@ const Game = {
     Particles.update(dt, this.time, p);
 
     // 적을 모두 물리치면 출구가 열림
-    if (!this.cleared && Enemies.remaining === 0) {
+    if (!this.cleared && Enemies.remaining === 0 && !Enemies.boss) {   // (보스는 다 부서져 사라진 뒤에)
       this.cleared = true;
       World.gateOpen = true;
       Sound.play('chime');
@@ -199,6 +198,7 @@ function loop(now) {
   lastTime = now;
   AutoQuality.update(frameSec);
   Game.update(dt);
+  Sound.update(dt);   // (게임이 잠깐 멈칫해도 음악 박자는 그대로)
   Game.draw();
   Input.endFrame();
   requestAnimationFrame(loop);

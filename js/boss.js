@@ -206,6 +206,7 @@ const Golem = {
       Camera.shake = Math.max(Camera.shake, 0.5);
       Particles.sparks(e.x, e.groundY + 2.5, e.z, 30, GOLEM_COLORS.crystal.slice(0, 3).map((v) => Math.min(1, v * 1.4)));
       Boulders.list = [];
+      UI.message('바위 골렘을 쓰러뜨렸다!', '가슴의 수정이 빛을 잃는다');
     }
   },
 
@@ -371,8 +372,6 @@ const Golem = {
       Skills.impact(e.x, y, e.z, 2.6, GOLEM_PAL);
       Skills.flash = Math.max(Skills.flash, 0.35);
       Sound.play('slam');
-      Sound.play('chime');
-      UI.message('바위 골렘을 쓰러뜨렸다!', '동굴 깊은 곳의 봉인이 풀린다');
     }
   },
 

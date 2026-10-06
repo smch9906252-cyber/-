@@ -921,26 +921,30 @@ const UI = {
     this.text('N', cx + Math.cos(na) * (R - 10 * s), cy + Math.sin(na) * (R - 10 * s), 12, '#ffe08a', 'center');
   },
 
-  // 이어 하기로 시작했을 때: 처음 10초 동안 '처음부터' 버튼 (누르면 제1장부터)
+  // 이어 하기로 시작했을 때 처음 10초 동안, 그리고 마지막 구역까지 끝냈을 때: '처음부터' 버튼 (누르면 제1장부터)
   restartBox: null,
   drawRestart(t) {
     this.restartBox = null;
-    if (!Game.resumed || Game.levelIndex === 0) return;
-    const a = Utils.clamp((10 - t) / 1.5, 0, 1);
-    if (a <= 0) {
-      Game.resumed = false;
-      return;
+    let a;
+    if (Game.finished) a = 1;
+    else {
+      if (!Game.resumed || Game.levelIndex === 0) return;
+      a = Utils.clamp((10 - t) / 1.5, 0, 1);
+      if (a <= 0) {
+        Game.resumed = false;
+        return;
+      }
     }
     const g = this.g, s = this.s, W = this.canvas.width, H = this.canvas.height;
-    const msg = '↺ 처음부터 하기';
+    const msg = Game.finished ? '↺ 처음부터 다시 하기' : '↺ 처음부터 하기';
     g.font = this.font(15);
-    const w = g.measureText(msg).width + 36 * s, h = 34 * s, x = W / 2 - w / 2, y = H * 0.28 + 64 * s;
+    const w = g.measureText(msg).width + 36 * s, h = 34 * s, x = W / 2 - w / 2, y = Game.finished ? H * 0.36 + 76 * s : H * 0.28 + 64 * s;   // 끝냈을 땐 축하 글자 아래
     g.save();
     g.globalAlpha = a;
     this.panel(x, y, w, h, h / 2);
     g.restore();
     this.text(msg, W / 2, y + h / 2, 15, '#ffe7a8', 'center', a);
-    this.text('저장된 구역부터 이어 합니다', W / 2, y + h + 16 * s, 12, '#ffffff', 'center', a * 0.8);
+    if (!Game.finished) this.text('저장된 구역부터 이어 합니다', W / 2, y + h + 16 * s, 12, '#ffffff', 'center', a * 0.8);
     this.restartBox = { x, y, w, h };
   },
 
