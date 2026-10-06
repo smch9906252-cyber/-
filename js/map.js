@@ -215,7 +215,8 @@ const World = {
     if (this.cave || this.pondNear(x, z)) return 0;
     const n = Utils.fbm2(x * 0.06 + 40, z * 0.06 - 25, 3);
     const open = 1 - this.blend(x, z, (c) => c === '#');
-    return Utils.clamp((n - 0.46) * 5, 0, 1) * open * open * (1 - this.dirtAmount(x, z));
+    const k = LIGHTING[this.level.theme].gold ?? 1;   // 테마별 양 (노을은 적게)
+    return Utils.clamp((n - 0.46) * 5, 0, 1) * open * open * (1 - this.dirtAmount(x, z)) * k;
   },
 
   // 풀 포기 색: 그 자리 땅 색을 따라감 (마른 풀밭은 노르스름, 숲 가장자리는 짙게) → 풀과 땅이 한 덩어리로 보임
